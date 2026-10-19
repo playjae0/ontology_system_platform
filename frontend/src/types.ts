@@ -79,5 +79,6 @@ export interface LayoutState {
   running: boolean;         // 워커가 반복을 돌고 있다
   paused: boolean;          // 사람이 「멈춤」을 눌렀다
   iterations: number;       // 이번 판에서 돈 반복 수
-  max: number;              // 이번 판의 반복 상한
+  max: number;              // 이번 판의 반복 상한(끌기 배치는 놓을 때까지 Infinity)
+  kind: "layout" | "drag";  // 전체 배치 / 끌기 배치
 }

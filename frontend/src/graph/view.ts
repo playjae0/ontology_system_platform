@@ -13,7 +13,7 @@ import { EdgeCurvedArrowProgram } from "@sigma/edge-curve";
 import { createNodeBorderProgram } from "@sigma/node-border";
 
 import type { GEdge, GNode, Graph as GraphData, LayoutState } from "../types";
-import { ForceLayout, FORCE_CFG, FORCE_ITER, REWARM_ITER } from "./force";
+import { ForceLayout, FORCE_CFG, FORCE_ITER, FOLLOW_DEFAULT } from "./force";
 import { seedPositions, type XY } from "./seed";
 import {
   COLOR, FONT, type Axis, axisValue, colorOf, edgeShown, isSkeleton, labelScaleOf, nodeShown, shortName, sizeOf,
@@ -61,8 +61,10 @@ export class GraphView {
   private pinned = new Map<string, XY>();        // 사람이 놓은 점 — 그 세션 동안 그 자리
   private hover: string | null = null;
   private hoverNbrs = new Set<string>();
-  private press: { node: string; moved: boolean } | null = null;
+  // 누른 손짓 하나 — moved: 움직였다(끌기) · dragLayout: 이 손짓이 끌기 배치를 시작했다(놓을 때 식힌다)
+  private press: { node: string; moved: boolean; dragLayout: boolean } | null = null;
   private dragging: string | null = null;
+  private follow = FOLLOW_DEFAULT;                // 「끌 때 따라오는 범위」의 k₀ — 다음 끌기부터
   private zoomedIn = false;
   private scaling: number;
   private readonly gravity: number;
@@ -164,6 +166,11 @@ export class GraphView {
     this.layout.pause(on);
   }
 
+  /** 끌 때 따라오는 범위 — 용수철 k₀. 다음 끌기부터 쓴다. */
+  setFollow(k0: number): void {
+    this.follow = k0;
+  }
+
   /** 그 노드로 — 카메라를 옮긴다(인접 엣지를 눌렀을 때). */
   focus(id: string): void {
     if (!this.graph.hasNode(id)) return;
@@ -176,14 +183,6 @@ export class GraphView {
     const pos: Record<string, XY> = {};
     this.graph.forEachNode((id, a) => { pos[id] = { x: a.x, y: a.y }; });
     return pos;
-  }
-
-  /** 다시 데우기 — 쉰 워커를 지금 자리에서 다시 돌린다(고정한 점 + 끄는 점은 고정). */
-  private rewarm(): void {
-    const fixed = new Set(this.pinned.keys());
-    if (this.dragging) fixed.add(this.dragging);
-    this.layout.start({ positions: this.currentPositions(), fixed, scaling: this.scaling, gravity: this.gravity,
-                        iterations: REWARM_ITER });
   }
 
   /** 워커의 한 프레임 — 그 자리로 옮긴다(끄는 중인 점은 손이 정한다). */
@@ -252,8 +251,12 @@ export class GraphView {
       }
     });
 
-    // 끌기 — 누른 채 움직이면 그 점이 손을 따라가고, 힘이 돌고 있으면 이웃이 따라온다. 놓으면 그 자리에 고정.
-    sg.on("downNode", ({ node }) => { this.press = { node, moved: false }; });
+    // 끌기 — 누른 채 움직이면 그 점이 손을 따라가고 연결된 노드가 따라온다. 놓으면 그 자리에 고정(명세 §5.1).
+    //   · 전체 배치가 도는 중 → 그 점만 pin(배치는 이어진다) · 도중에 전체 배치가 끝나면 다음 움직임부터 끌기 배치
+    //   · 사람이 「멈춤」을 눌렀다 → 그 점만 옮긴다(멈춤을 풀지 않는다)
+    //   · 그 밖(쉼 · 끌기 배치 중 · 식히는 중) → 끌기 배치를 새로 시작 — 그 순간 좌표가 제자리
+    // 누른 채 움직이지 않고 떼면 누르기다(상세) — 배치는 건드리지 않는다(DECISIONS P-15).
+    sg.on("downNode", ({ node }) => { this.press = { node, moved: false, dragLayout: false }; });
     const mouse = sg.getMouseCaptor();
     mouse.on("mousemovebody", (e) => {
       if (!this.press) return;
@@ -264,17 +267,24 @@ export class GraphView {
         // 끄는 동안 좌표 틀을 굳힌다 — 안 굳히면 점이 움직일 때마다 화면 맞춤이 다시 돌아 손과 어긋난다.
         if (!sg.getCustomBBox()) sg.setCustomBBox(sg.getBBox());
       }
+      const s = this.layout.state;
+      const layoutRunning = s.kind === "layout" && s.running;
+      if (!this.press.dragLayout && !s.paused && !layoutRunning) {
+        // 제자리는 이 움직임을 반영하기 전 좌표다. 이미 놓아 둔 점과 끄는 점은 고정.
+        this.layout.startDrag(node, this.currentPositions(), new Set(this.pinned.keys()), this.follow,
+                              this.scaling, this.gravity);
+        this.press.dragLayout = true;
+      }
       const p = sg.viewportToGraph(e);
       this.graph.mergeNodeAttributes(node, { x: p.x, y: p.y });
       this.pinned.set(node, p);
-      // 쉰 뒤에 끌면 다시 데운다. 사람이 「멈춤」을 눌렀으면 그 점만 옮긴다(DECISIONS P-05).
-      if (!this.layout.state.running && !this.layout.state.paused) this.rewarm();
       this.layout.pin(node, p.x, p.y);
       e.preventSigmaDefault();
       e.original.preventDefault();
       e.original.stopPropagation();
     });
     const drop = () => {
+      if (this.press?.dragLayout) this.layout.release();   // 이 손짓이 시작한 끌기 배치만 식힌다
       this.press = null;
       this.dragging = null;
     };

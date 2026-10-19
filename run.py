@@ -1,17 +1,20 @@
 # -*- coding: utf-8 -*-
 """플랫폼 진입점 — 명령 하나로 시스템 데이터 서버와 플랫폼을 함께 켠다(명세 §3.1).
 
-    python run.py --system <시스템 폴더> [--port N] [--allow-mock] [--no-browser]
+    python run.py --system <시스템 폴더> [--port N] [--no-browser]
+    (개발 세션 전용 `--allow-mock`은 도움말에 보이지 않는다 — 명세 §2-5)
 
 1. 시스템 데이터 서버를 자식으로 띄운다(시스템 폴더에서 `python -u run.py viewer --no-browser --port N`).
 2. 그 출력에서 `[viewer] http://127.0.0.1:<포트>/` 줄을 찾아 주소를 읽는다.
-3. `/api/health`의 `mode`가 `"mock"`이고 `--allow-mock`이 없으면 거부하고 멈춘다.
+3. `/api/health`의 `mode`가 `"mock"`이고 `--allow-mock`이 없으면 화면을 열지 않고 멈춘다 — 원인을 찾을 사실(셸의 ONTO_HOME ·
+   시스템이 읽은 상태 폴더)을 보이고 `--allow-mock`은 안내하지 않는다(명세 §3.1-3).
 4. `/api/health`·`/api/graph`의 칸을 확인한다 — 빠지면 빠진 칸을 찍고 멈춘다.
 5. 플랫폼 주소를 찍고(기본으로 브라우저를 연다), 끝날 때(Ctrl+C·SIGTERM·오류) 시스템 서버도 끈다.
 """
 from __future__ import annotations
 
 import argparse
+import os
 import signal
 import sys
 import threading
@@ -25,17 +28,26 @@ DIST = ROOT / "frontend" / "dist"
 
 # 종료 코드
 EXIT_START = 1        # 시스템 서버를 못 띄웠다
-EXIT_MOCK = 2         # 시스템이 mock인데 --allow-mock이 없다
+EXIT_MOCK = 2         # 시스템이 실데이터로 뜨지 않았다(mock)
 EXIT_MISSING = 3      # 화면이 쓰는 칸이 빠졌다
 
-MOCK_REFUSAL = "시스템이 mock 모드로 떠 있다 — 사내 데이터가 아니다. 개발 중이면 --allow-mock"
+
+def mock_refusal(home) -> list[str]:
+    """시스템이 mock으로 떴을 때의 네 줄(명세 §3.1-3). 사내에서 이 문면을 보는 것은 대개 셸에 ONTO_HOME이 없어
+    시스템이 실데이터 설정(`$ONTO_HOME/llm.json`)을 못 읽었을 때다 — 원인을 찾을 사실만 보이고 `--allow-mock`은 말하지 않는다."""
+    return [
+        "시스템이 실데이터가 아니라 mock 모드로 떴다 — 화면을 열지 않는다",
+        f"  이 셸의 ONTO_HOME: {os.environ.get('ONTO_HOME') or '없음'}",
+        f"  시스템이 읽은 상태 폴더: {home}",
+        "  셸 설정(~/.zshrc 등)의 ONTO_HOME과 그 폴더의 llm.json을 확인한다",
+    ]
 
 
 def parse_args(argv):
     p = argparse.ArgumentParser(description="온톨로지 시스템 플랫폼 — 시스템 데이터 서버와 화면을 함께 켠다")
     p.add_argument("--system", required=True, help="시스템 코드 폴더(run.py가 있는 곳)")
     p.add_argument("--port", type=int, default=8800, help="플랫폼 포트(기본 8800 · 차 있으면 다음 빈 번호)")
-    p.add_argument("--allow-mock", action="store_true", help="시스템이 mock이어도 연다 — 개발 세션만")
+    p.add_argument("--allow-mock", action="store_true", help=argparse.SUPPRESS)   # 개발 세션 전용 — 도움말에 숨긴다
     p.add_argument("--no-browser", action="store_true", help="브라우저를 열지 않는다")
     return p.parse_args(argv)
 
@@ -81,7 +93,8 @@ def main(argv=None) -> int:
         _code, health = server.get_json("/api/health")
         mode = health.get("mode") if isinstance(health, dict) else None
         if mode == "mock" and not args.allow_mock:
-            server.note(f"[platform] {MOCK_REFUSAL}")
+            for line in mock_refusal(health.get("home")):
+                server.note(f"[platform] {line}")
             return EXIT_MOCK
 
         missing: dict[str, list[str]] = {}
