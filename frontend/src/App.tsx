@@ -7,6 +7,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { getJSON } from "./api";
 import { GraphView, searchHit, type ViewState } from "./graph/view";
 import { type Axis, edgeShown, nodeShown } from "./graph/style";
+import { FOLLOW_DEFAULT } from "./graph/force";
 import type { Graph, Health, LayoutState, PlatformStatus, SysStatus } from "./types";
 import { Header } from "./panels/Header";
 import { Controls } from "./panels/Controls";
@@ -29,7 +30,8 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [missing, setMissing] = useState<Record<string, string[]>>({});
   const [vectorLine, setVectorLine] = useState<string>("");
-  const [layout, setLayout] = useState<LayoutState>({ running: false, paused: false, iterations: 0, max: 0 });
+  const [layout, setLayout] = useState<LayoutState>(
+    { running: false, paused: false, iterations: 0, max: 0, kind: "layout" });
 
   const [axis, setAxis] = useState<Axis>("category");
   const [rels, setRels] = useState<Set<string>>(new Set());
@@ -37,6 +39,7 @@ export default function App() {
   const [fullLabels, setFullLabels] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [spacing, setSpacing] = useState(1);
+  const [follow, setFollow] = useState(FOLLOW_DEFAULT);
 
   const canvasRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<GraphView | null>(null);
@@ -107,6 +110,7 @@ export default function App() {
       layout: {
         get running() { return v.layout.state.running; },
         get iterations() { return v.layout.state.iterations; },
+        get kind() { return v.layout.state.kind; },
       },
     };
     return () => { v.destroy(); viewRef.current = null; delete window.__platform; };
@@ -148,6 +152,7 @@ export default function App() {
                       search={search} onSearch={setSearch} hits={hits}
                       fullLabels={fullLabels} onFullLabels={setFullLabels}
                       spacing={spacing} onSpacing={(m) => { setSpacing(m); viewRef.current?.setSpacing(m); }}
+                      follow={follow} onFollow={(k) => { setFollow(k); viewRef.current?.setFollow(k); }}
                       layout={layout} onPause={(on) => viewRef.current?.pause(on)}
                       onRelayout={() => viewRef.current?.relayout()}
                       hiddenNodes={counts?.hiddenNodes ?? 0} />

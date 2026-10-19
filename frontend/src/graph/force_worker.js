@@ -1,6 +1,10 @@
 /* 이 파일은 시스템 뷰어의 힘 배치 워커를 **옮겨 온 것**이다 — 불러오기가 아니라 복사 · 플랫폼이 소유한다(명세 §2-2).
- *   출처: playjae0/ontology_system @ 4af5505 · cli/viewer/static/force_worker.js (133행 · 고치지 않고 그대로)
- *   다루는 쪽은 `force.ts`다(시스템 `layout.js`의 forceStart · forcePause · forcePin을 옮기고 「다시 데우기」를 더했다).
+ *   출처: playjae0/ontology_system @ 4af5505 · cli/viewer/static/force_worker.js
+ *   플랫폼 사본에 더한 것 둘 (P1.5 · 명세 §5.1 끌기 배치):
+ *     ① `start`의 선택 칸 `anchor: {k}` — 노드마다 제자리 용수철 세기. 있으면 시작 좌표를 제자리로 잡고 중력 다음에
+ *        `−k·m·(지금 − 제자리)`를 더한다. **없으면 시스템 원본과 한 글자도 다르지 않게 돈다**(전체 배치는 바뀌지 않는다).
+ *     ② 메시지 `cool {iters}` — 반복 상한을 「지금 반복 수 + iters」로 바꾸고, 쉬고 있으면 다시 돈다(놓은 뒤 식힘).
+ *   위 두 가지만 더했다. 다루는 쪽은 `force.ts`다(시스템 `layout.js`의 forceStart · forcePause · forcePin을 옮겼다).
  */
 /* 칸 5.2 — 뷰어 **힘 배치 워커** — ForceAtlas2 계열 · Barnes–Hut · 결정적 (B114 ①).
  *
@@ -16,12 +20,14 @@
  * **결정적이다**: 난수 0 · 걸음은 반복 수로 센다(시각으로 끊지 않는다) · 같은 시드 좌표 · 같은 반복 수면 같은 좌표.
  * 프레임은 `frameEvery` 반복마다 하나 — 몇 번째 반복의 좌표인지를 함께 보낸다.
  *
- * 메시지: start {x, y, m, edges, fixed, cfg} · stop · resume · pin {i, x, y} → frame {x, y, iter, max, done, ms}
+ * 메시지: start {x, y, m, edges, fixed, cfg, anchor?} · stop · resume · pin {i, x, y} · cool {iters}
+ *         → frame {x, y, iter, max, done, ms}
  */
 "use strict";
 
 let X, Y, M, DX, DY, OX, OY, FIX, EA, EB, N = 0, iter = 0, maxIter = 0, running = false;
 let speed = 1, speedEff = 1, cfg = {}, runMs = 0;
+let AK = null, AX, AY;                              // 제자리 용수철(플랫폼 사본 ①) — 없으면 null
 
 function init(m) {
   X = Float64Array.from(m.x); Y = Float64Array.from(m.y); M = Float64Array.from(m.m);
@@ -30,6 +36,8 @@ function init(m) {
   FIX = Uint8Array.from(m.fixed || new Array(N).fill(0));
   EA = Int32Array.from(m.edges.map((e) => e[0])); EB = Int32Array.from(m.edges.map((e) => e[1]));
   cfg = m.cfg; iter = 0; maxIter = cfg.maxIter; speed = 1; speedEff = 1; runMs = 0;
+  AK = m.anchor ? Float64Array.from(m.anchor.k) : null;
+  if (AK) { AX = Float64Array.from(X); AY = Float64Array.from(Y); }   // 시작 좌표가 제자리
 }
 
 /** 사분 나무 — 칸마다 질량 · 질량 중심 · 자식 넷(잎은 점 하나 · 같은 자리에 쌓이면 한 칸에 모은다). */
@@ -84,6 +92,10 @@ function step() {
     const d = Math.hypot(X[i], Y[i]);
     if (d > 0) { const f = kg * M[i] / d; DX[i] -= X[i] * f; DY[i] -= Y[i] * f; }
   }
+  // 제자리 용수철(플랫폼 사본 ①) — 끌기 배치에서만 · `−k·m·(지금 − 제자리)`
+  if (AK) {
+    for (let i = 0; i < N; i++) { DX[i] -= AK[i] * M[i] * (X[i] - AX[i]); DY[i] -= AK[i] * M[i] * (Y[i] - AY[i]); }
+  }
   // 끌림 — 선형
   for (let k = 0; k < EA.length; k++) {
     const a = EA[k], b = EB[k], dx = X[a] - X[b], dy = Y[a] - Y[b];
@@ -134,4 +146,8 @@ onmessage = (ev) => {
   else if (m.type === "stop") { running = false; post(iter >= maxIter); }
   else if (m.type === "resume") { if (!running && iter < maxIter) { running = true; setTimeout(loop, 0); } }
   else if (m.type === "pin" && N && m.i >= 0 && m.i < N) { FIX[m.i] = 1; X[m.i] = m.x; Y[m.i] = m.y; }
+  else if (m.type === "cool" && N) {                // 식힘(플랫폼 사본 ②) — 지금부터 iters만 더 돌고 쉰다
+    maxIter = iter + m.iters;
+    if (!running) { running = true; setTimeout(loop, 0); }
+  }
 };

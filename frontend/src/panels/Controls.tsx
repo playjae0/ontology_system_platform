@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import type { Graph, LayoutState } from "../types";
 import { AXES, type Axis, axisValue, colorOf, COLOR, nodeShown, SIZE_OTHER, TIER_SIZE } from "../graph/style";
+import { FOLLOW_STEPS } from "../graph/force";
 
 interface Props {
   graph: Graph;
@@ -11,12 +12,15 @@ interface Props {
   search: string; onSearch: (q: string) => void; hits: number | null;
   fullLabels: boolean; onFullLabels: (on: boolean) => void;
   spacing: number; onSpacing: (m: number) => void;
+  follow: number; onFollow: (k0: number) => void;
   layout: LayoutState; onPause: (on: boolean) => void; onRelayout: () => void;
   hiddenNodes: number;
 }
 
 const SEARCH_DEBOUNCE_MS = 150;
 const SPACING_STEPS = [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4];
+/** 「끌 때 따라오는 범위」 다섯 단의 이름 — 값(k₀)은 force.ts 머리의 FOLLOW_STEPS. */
+const FOLLOW_WORDS = ["가장 좁게", "좁게", "가운데", "넓게", "가장 넓게"];
 
 export function Controls(p: Props) {
   // 찾기 — 글자마다가 아니라 잠깐 쉰 뒤에(강조만 하니 좌표는 그대로다).
@@ -41,6 +45,7 @@ export function Controls(p: Props) {
   };
 
   const stepIndex = Math.max(0, SPACING_STEPS.indexOf(p.spacing));
+  const followIndex = Math.max(0, FOLLOW_STEPS.indexOf(p.follow));
 
   return (
     <div className="controls">
@@ -62,7 +67,14 @@ export function Controls(p: Props) {
         <input type="range" min={0} max={SPACING_STEPS.length - 1} step={1} value={stepIndex}
                onChange={(e) => p.onSpacing(SPACING_STEPS[Number(e.target.value)])} data-testid="spacing" />
       </label>
-      <div className="note">놓은 노드는 그 자리에 고정된다 — 「다시 배치」가 고정을 푼다.</div>
+      <label className="note">
+        끌 때 따라오는 범위 — {FOLLOW_WORDS[followIndex]}
+        <input type="range" min={0} max={FOLLOW_STEPS.length - 1} step={1} value={followIndex}
+               onChange={(e) => p.onFollow(FOLLOW_STEPS[Number(e.target.value)])} data-testid="follow" />
+      </label>
+      <div className="note range-ends"><span>좁게</span><span>넓게</span></div>
+      <div className="note">끌면 가까운 노드일수록 많이 따라온다(다음 끌기부터 적용). 놓은 노드는 그 자리에 고정된다 —
+        「다시 배치」가 고정을 푼다. 「멈춤」 동안 끌면 그 점만 옮긴다.</div>
 
       <h3>라벨</h3>
       <label className="chk">

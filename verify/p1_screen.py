@@ -43,7 +43,10 @@ def state_hashes(home: Path) -> dict[str, str]:
 
 
 def wait_rest(page, timeout=60000):
+    """배치가 쉴 때까지 + 화면이 두 번 더 그려질 때까지 — sigma는 노드 집기를 다음 그리기에서 고친 집기 버퍼로 하므로,
+    쉰 바로 그 순간에 누르면 한 프레임 전 자리로 집는다(사람 손은 그보다 느리다)."""
     page.wait_for_function(JS_REST, timeout=timeout)
+    page.evaluate("() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))")
 
 
 def screen_xy(page, node_id: str) -> tuple[float, float]:
@@ -55,44 +58,33 @@ def screen_xy(page, node_id: str) -> tuple[float, float]:
         return [r.left + v.x, r.top + v.y]; }""", node_id))
 
 
-def drag_check(page, node_id: str, nbrs: list[str], label: str, rep: Report, expect_running: bool | None):
-    """끌어 옮기고 2초 뒤 이웃의 평균 이동을 잰다(ⓕ). 돌려주는 값 — 놓은 자리(그래프 좌표)."""
+def drag_target(page, x0: float, y0: float) -> tuple[float, float]:
+    """끌 곳 — 캔버스 가운데 쪽으로 캔버스 폭(짧은 변)의 25%(가장자리 밖으로 나가 「놓기」가 되지 않게)."""
     box = page.locator("#canvas").bounding_box()
-    x0, y0 = screen_xy(page, node_id)
-    # 캔버스 가운데 쪽으로, 캔버스 폭의 25%만큼(가장자리 밖으로 나가 「놓기」가 되지 않게)
     cx, cy = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
     dx, dy = cx - x0, cy - y0
     norm = math.hypot(dx, dy) or 1.0
     length = 0.25 * min(box["width"], box["height"])
-    x1, y1 = x0 + dx / norm * length, y0 + dy / norm * length
+    return x0 + dx / norm * length, y0 + dy / norm * length
 
-    before = page.evaluate(JS_POSITIONS)
-    page.mouse.move(x0, y0)
-    t0 = time.monotonic()
-    page.mouse.down()
-    running_at_down = page.evaluate("() => window.__platform.layout.running")
-    page.mouse.move(x1, y1, steps=25)
-    dropped = page.evaluate(JS_POSITIONS)[node_id]
-    page.mouse.up()
-    time.sleep(max(0.0, 2.0 - (time.monotonic() - t0)))      # 2초 안에
-    after = page.evaluate(JS_POSITIONS)
 
-    mx, my = after[node_id][0] - before[node_id][0], after[node_id][1] - before[node_id][1]
-    moved = math.hypot(mx, my)
-    vecs = [(after[n][0] - before[n][0], after[n][1] - before[n][1]) for n in nbrs]
-    mean_move = sum(math.hypot(*v) for v in vecs) / len(vecs)
-    avg = (sum(v[0] for v in vecs) / len(vecs), sum(v[1] for v in vecs) / len(vecs))
-    dot = avg[0] * mx + avg[1] * my
-    ratio = mean_move / moved if moved else 0.0
-    stays = math.hypot(after[node_id][0] - dropped[0], after[node_id][1] - dropped[1])
-    ok = moved > 0 and ratio >= 0.10 and dot > 0 and stays < 1e-9
-    note = "" if expect_running is None or running_at_down == expect_running else \
-        f" (주의: 누를 때 running={running_at_down})"
-    rep.item(f"ⓕ-{label}", ok,
-             f"노드 {node_id[-6:]} 이웃 {len(nbrs)} · 누를 때 배치 running={running_at_down}{note} · "
-             f"끈 거리 {moved:.3f} · 이웃 평균 이동 {mean_move:.3f} = {ratio:.0%} · 내적 {dot:+.4f} · "
-             f"놓은 자리에서 2초 뒤 어긋남 {stays:.2e}")
-    return dropped
+def press_relayout_move(page, node_id: str, tries: int = 5):
+    """전체 배치가 도는 중에 끌기를 잡는다 — 노드를 누른 채(아직 움직이지 않고) 「다시 배치」를 키보드로 누르고(포커스 + Enter)
+    곧바로 움직인다. 첫 움직임 직후 `kind === "layout"`이고 running일 때만 잡은 것으로 본다 — 아니면 놓고 다시(`tries`번까지).
+    잡으면 마우스를 누른 채로 `(몇 번째, 첫 움직임 뒤 마우스 자리)`, 못 잡으면 None."""
+    for attempt in range(1, tries + 1):
+        wait_rest(page)
+        x0, y0 = screen_xy(page, node_id)
+        page.mouse.move(x0, y0)
+        page.mouse.down()
+        page.focus("[data-testid=relayout]")
+        page.keyboard.press("Enter")
+        page.mouse.move(x0 + 2, y0 + 2)
+        st = page.evaluate("() => [window.__platform.layout.kind, window.__platform.layout.running]")
+        if st == ["layout", True]:
+            return attempt, (x0 + 2, y0 + 2)
+        page.mouse.up()
+    return None
 
 
 def main():
@@ -226,25 +218,47 @@ def main():
             page.click("[data-testid=rels-all]")
             time.sleep(0.3)
 
-            # ⓕ 당기면 따라온다 — ① 배치가 도는 중(다시 배치 직후) ② 배치가 쉰 뒤(다시 데우기)
+            # ⓕ 당기면 따라온다 — 전체 배치가 도는 중의 끌기(P1.5에서 쉰 뒤의 끌기는 끌기 배치라 p15_drag.py가 잰다)
             nbrs_of = {}
             for e in data["edges"]:
                 if e["src"] in pos and e["dst"] in pos and e["src"] != e["dst"]:
                     nbrs_of.setdefault(e["src"], set()).add(e["dst"])
                     nbrs_of.setdefault(e["dst"], set()).add(e["src"])
-            order = sorted(nbrs_of, key=lambda i: (-len(nbrs_of[i]), i))
-            a_id, b_id = order[0], next(i for i in order[1:] if i not in nbrs_of[order[0]])
-            page.click("[data-testid=relayout]")
-            page.wait_for_function("window.__platform.layout.iterations >= 200", timeout=20000)
-            drop_a = drag_check(page, a_id, sorted(nbrs_of[a_id]), "도는 중", rep, expect_running=True)
-            wait_rest(page)
-            drop_b = drag_check(page, b_id, sorted(nbrs_of[b_id]), "쉰 뒤", rep, expect_running=False)
-            wait_rest(page)
-            final = page.evaluate(JS_POSITIONS)
-            off_a = math.hypot(final[a_id][0] - drop_a[0], final[a_id][1] - drop_a[1])
-            off_b = math.hypot(final[b_id][0] - drop_b[0], final[b_id][1] - drop_b[1])
-            rep.item("ⓕ-고정", off_a < 1e-9 and off_b < 1e-9,
-                     f"두 번 끈 뒤 배치가 쉬었을 때 놓은 자리에서 어긋남 — 첫 노드 {off_a:.2e} · 둘째 노드 {off_b:.2e}")
+            a_id = sorted(nbrs_of, key=lambda i: (-len(nbrs_of[i]), i))[0]
+            caught = press_relayout_move(page, a_id)
+            if caught is None:
+                rep.item("ⓕ-도는 중", False, "다섯 번 모두 첫 움직임 직후 전체 배치가 돌고 있지 않았다")
+            else:
+                attempt, (x0, y0) = caught
+                t0 = time.monotonic()
+                # 기준 = 처음 전체 배치가 쉰 좌표(ⓔ의 pos). 「다시 배치」는 같은 시작에서 결정적으로 같은 곳에 쉬므로
+                # 끌지 않았다면 이 좌표로 돌아온다 — 차이가 곧 끌기의 효과다(다시 배치 직후 좌표는 시작 자리라 기준이 못 된다).
+                before = pos
+                x1, y1 = drag_target(page, x0, y0)
+                page.mouse.move(x1, y1, steps=25)
+                drop_a = page.evaluate(JS_POSITIONS)[a_id]
+                kind_up = page.evaluate("() => window.__platform.layout.kind")
+                page.mouse.up()
+                time.sleep(max(0.0, 2.0 - (time.monotonic() - t0)))  # 2초 안에
+                after = page.evaluate(JS_POSITIONS)
+                mx, my = after[a_id][0] - before[a_id][0], after[a_id][1] - before[a_id][1]
+                moved = math.hypot(mx, my)
+                nbrs = sorted(nbrs_of[a_id])
+                vecs = [(after[n][0] - before[n][0], after[n][1] - before[n][1]) for n in nbrs]
+                mean_move = sum(math.hypot(*v) for v in vecs) / len(vecs)
+                avg = (sum(v[0] for v in vecs) / len(vecs), sum(v[1] for v in vecs) / len(vecs))
+                dot = avg[0] * mx + avg[1] * my
+                ratio = mean_move / moved if moved else 0.0
+                stays = math.hypot(after[a_id][0] - drop_a[0], after[a_id][1] - drop_a[1])
+                rep.item("ⓕ-도는 중", moved > 0 and ratio >= 0.10 and dot > 0 and stays < 1e-9,
+                         f"{attempt}번째에 잡음(첫 움직임 직후 kind=layout · running=True) · 놓을 때 kind={kind_up} · "
+                         f"기준 = 끌지 않은 전체 배치의 쉰 좌표 · "
+                         f"노드 {a_id[-6:]} 이웃 {len(nbrs)} · 끈 거리 {moved:.3f} · 이웃 평균 이동 {mean_move:.3f} = "
+                         f"{ratio:.0%} · 내적 {dot:+.4f} · 놓은 자리에서 2초 뒤 어긋남 {stays:.2e}")
+                wait_rest(page)
+                final = page.evaluate(JS_POSITIONS)
+                off_a = math.hypot(final[a_id][0] - drop_a[0], final[a_id][1] - drop_a[1])
+                rep.item("ⓕ-고정", off_a < 1e-9, f"배치가 쉬었을 때 놓은 자리에서 어긋남 {off_a:.2e}")
             page.screenshot(path=str(CAPTURES / "p1_after_drag_mock.png"))
             if errors:
                 print("페이지 오류:", errors)

@@ -17,11 +17,14 @@ body {
   padding: 4px 8px; border-bottom: 1px solid #e6c766; position: sticky; top: 0; z-index: 10;
 }
 .head {
-  display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center;
+  display: flex; flex-wrap: nowrap; gap: 14px; align-items: center; white-space: nowrap; overflow: hidden;
   padding: 6px 12px; border-bottom: 1px solid var(--line);
 }
+.head > * { flex: none; }
 .head .title { font-weight: bold; }
-.head .item { white-space: nowrap; }
+.head .shrink { flex: 0 1 auto; min-width: 3em; overflow: hidden; text-overflow: ellipsis; }
+.head .vector { flex: 1 1 0; }
+.head .layout-state { min-width: 13em; font-variant-numeric: tabular-nums; }
 .badge { background: var(--panel2); border-radius: 4px; padding: 1px 8px; }
 .muted, .note { color: var(--dim); }
 .note { font-size: 12px; margin: 4px 0 8px; }
@@ -70,3 +73,4 @@ input[type=range] { width: 100%; }
 .adj a { color: var(--link); }
 .rel { background: var(--panel); border-radius: 3px; padding: 0 4px; font-size: 12px; }
 .rel.cross { color: var(--cross); font-weight: bold; }
+.range-ends { display: flex; justify-content: space-between; margin-top: -4px; }
