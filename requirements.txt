@@ -1,0 +1,4 @@
+# 플랫폼 백엔드 의존 — 판을 고정한다(사내는 Python만 있다 · Node 불필요 — 화면은 frontend/dist로 들어 있다).
+# 이 판으로 Python 3.13에서 확인했다. uvicorn 0.38은 Python 3.9 이상(시스템은 3.10 이상을 요구한다).
+fastapi==0.120.4
+uvicorn==0.38.0

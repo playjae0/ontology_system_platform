@@ -1,0 +1,5 @@
+logs/
+node_modules/
+__pycache__/
+*.py[cod]
+# frontend/dist는 넣는다 — 사내에는 Node가 없다.
