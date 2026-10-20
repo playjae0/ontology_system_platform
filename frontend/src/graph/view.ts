@@ -254,7 +254,7 @@ export class GraphView {
     // 끌기 — 누른 채 움직이면 그 점이 손을 따라가고 연결된 노드가 따라온다. 놓으면 그 자리에 고정(명세 §5.1).
     //   · 전체 배치가 도는 중 → 그 점만 pin(배치는 이어진다) · 도중에 전체 배치가 끝나면 다음 움직임부터 끌기 배치
     //   · 사람이 「멈춤」을 눌렀다 → 그 점만 옮긴다(멈춤을 풀지 않는다)
-    //   · 그 밖(쉼 · 끌기 배치 중 · 식히는 중) → 끌기 배치를 새로 시작 — 그 순간 좌표가 제자리
+    //   · 그 밖(쉼 · 끌기 배치 중 · 식히는 중) → 끌기 배치를 새로 시작 — 그 순간이 평형이 되도록 제자리를 잡는다
     // 누른 채 움직이지 않고 떼면 누르기다(상세) — 배치는 건드리지 않는다(DECISIONS P-15).
     sg.on("downNode", ({ node }) => { this.press = { node, moved: false, dragLayout: false }; });
     const mouse = sg.getMouseCaptor();
@@ -270,7 +270,7 @@ export class GraphView {
       const s = this.layout.state;
       const layoutRunning = s.kind === "layout" && s.running;
       if (!this.press.dragLayout && !s.paused && !layoutRunning) {
-        // 제자리는 이 움직임을 반영하기 전 좌표다. 이미 놓아 둔 점과 끄는 점은 고정.
+        // 출발 좌표는 이 움직임을 반영하기 전 좌표다(워커가 여기서 알짜 힘을 재 제자리를 잡는다). 놓아 둔 점과 끄는 점은 고정.
         this.layout.startDrag(node, this.currentPositions(), new Set(this.pinned.keys()), this.follow,
                               this.scaling, this.gravity);
         this.press.dragLayout = true;

@@ -243,8 +243,10 @@ def main():
     if not args.skip_p1:
         codes = {}
         for script in ("p1_contract.py", "p1_process.py", "p1_screen.py"):
-            run = subprocess.run([sys.executable, str(ROOT / "verify" / script), "--system", str(args.system)],
-                                 cwd=ROOT, capture_output=True, text=True)
+            # 브라우저를 쓰는 p1_screen에만 --chromium을 넘긴다(p1_contract · p1_process는 쓰지 않는다)
+            browser_arg = ["--chromium", args.chromium] if args.chromium and script == "p1_screen.py" else []
+            run = subprocess.run([sys.executable, str(ROOT / "verify" / script), "--system", str(args.system),
+                                  *browser_arg], cwd=ROOT, capture_output=True, text=True)
             codes[script] = run.returncode
             tail = run.stdout[run.stdout.find("== 결과 =="):] if "== 결과 ==" in run.stdout else run.stdout[-800:]
             print(f"--- {script} (종료 코드 {run.returncode})\n{tail}")
