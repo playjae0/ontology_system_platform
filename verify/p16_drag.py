@@ -119,8 +119,9 @@ def main():
         return rep.finish()
 
     # ⓓ 회귀 — p15_drag.py ⓐ~ⓙ(그 안의 ⓘ가 P1 확인 셋을 돌린다 · 쓰기 0 · 외부 요청 0 포함)
-    run = subprocess.run([sys.executable, str(ROOT / "verify" / "p15_drag.py"), "--system", str(args.system)],
-                         cwd=ROOT, capture_output=True, text=True)
+    browser_arg = ["--chromium", args.chromium] if args.chromium else []      # 화면 확인이 같은 브라우저를 쓰게
+    run = subprocess.run([sys.executable, str(ROOT / "verify" / "p15_drag.py"), "--system", str(args.system),
+                          *browser_arg], cwd=ROOT, capture_output=True, text=True)
     block = run.stdout[run.stdout.rfind("== 결과 =="):]
     print(f"--- p15_drag.py (종료 코드 {run.returncode})\n{block}")
     rep.item("ⓓ", run.returncode == 0, f"p15_drag.py 종료 코드 {run.returncode} — P1.5 ⓐ~ⓙ · 그 안의 ⓘ로 P1 확인 셋")
