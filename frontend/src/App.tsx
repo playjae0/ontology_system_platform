@@ -1,11 +1,13 @@
 /* 화면 — 상태와 배선. 그리기는 `graph/view.ts`, 칸마다의 모양은 `panels/`가 맡는다.
  *
- * 화면은 계산하지 않는다(명세 §2-3): 받은 것을 그리고, 사람이 고른 것(색 축·관계·찾기·라벨·고른 점)만 상태로 든다.
+ * 화면은 계산하지 않는다(명세 §2-3): 받은 것을 그리고, 사람이 고른 것(색 축·관계·찾기·라벨·고른 점·탭·질문)만 상태로 든다.
+ * 탭 셋(그래프 · 질의 · 연결 현황)은 왼쪽 칸을 바꾼다. 그래프 캔버스는 늘 떠 있다 — 질의의 겹쳐 보기가 그 위에 칠해지고,
+ * 연결 현황은 캔버스 위에 덮어 보인다(sigma 캔버스를 숨기면 크기를 잃는다).
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { getJSON } from "./api";
-import { GraphView, searchHit, type ViewState } from "./graph/view";
+import { GraphView, searchHit, type Overlay, type ViewState } from "./graph/view";
 import { type Axis, edgeShown, nodeShown } from "./graph/style";
 import { FOLLOW_DEFAULT } from "./graph/force";
 import type { Graph, Health, LayoutState, PlatformStatus, SysStatus } from "./types";
@@ -13,6 +15,12 @@ import { Header } from "./panels/Header";
 import { Controls } from "./panels/Controls";
 import { Detail } from "./panels/Detail";
 import { MissingCard } from "./panels/MissingCard";
+import { QueryPanel } from "./panels/QueryPanel";
+import { DocPanel } from "./panels/DocPanel";
+import { FunnelView } from "./panels/FunnelView";
+
+type Tab = "graph" | "query" | "funnel";
+const TABS: [Tab, string][] = [["graph", "그래프"], ["query", "질의"], ["funnel", "연결 현황"]];
 
 declare global {
   interface Window {
@@ -40,6 +48,10 @@ export default function App() {
   const [selected, setSelected] = useState<string | null>(null);
   const [spacing, setSpacing] = useState(1);
   const [follow, setFollow] = useState(FOLLOW_DEFAULT);
+  const [tab, setTab] = useState<Tab>("graph");
+  const [question, setQuestion] = useState("");
+  const [overlay, setOverlay] = useState<Overlay | null>(null);
+  const [docOpen, setDocOpen] = useState<string | null>(null);   // 오른쪽 칸 — 문서 패널(없으면 노드 상세)
 
   const canvasRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<GraphView | null>(null);
@@ -117,6 +129,13 @@ export default function App() {
   }, [graph]);
 
   useEffect(() => { viewRef.current?.setView(viewState); }, [viewState]);
+  useEffect(() => { viewRef.current?.setOverlay(overlay); }, [overlay]);
+
+  // 질의 탭은 왼쪽 칸이 넓다 — 캔버스 크기가 바뀌므로 sigma에 알린다(창 크기 바뀜만 스스로 안다).
+  useEffect(() => {
+    const id = requestAnimationFrame(() => { viewRef.current?.sigma.resize(); viewRef.current?.sigma.refresh(); });
+    return () => cancelAnimationFrame(id);
+  }, [tab]);
 
   // ── 머리 줄의 수 — 보이기 판정은 그리기와 같은 함수 ────────────────────────
   const counts = useMemo(() => {
@@ -135,7 +154,21 @@ export default function App() {
 
   const pick = (id: string) => {
     setSelected(id);
+    setDocOpen(null);
     viewRef.current?.focus(id);
+  };
+
+  /** 칠할 노드 중 그리는 그래프에 없는 것(연결 없는 노드 등) — 「화면에 없는 노드 n개」. */
+  const offscreen = useMemo(() => {
+    if (!graph || !overlay) return 0;
+    const shown = new Set(graph.nodes.filter((n) => nodeShown(n, graph.anchor)).map((n) => n.id));
+    return Object.keys(overlay.nodes).filter((id) => !shown.has(id)).length;
+  }, [graph, overlay]);
+
+  /** 「이 노드로 질문」 — 질문 칸에 이름을 넣고 질의 탭으로. 전송은 사람이 한다(명세 §6.1). */
+  const askAbout = (name: string) => {
+    setQuestion(name);
+    setTab("query");
   };
 
   return (
@@ -145,9 +178,20 @@ export default function App() {
       )}
       <Header health={health} platform={platform} counts={counts} layout={layout} vectorLine={vectorLine} />
       <MissingCard missing={missing} />
-      <main>
+      <main className={tab === "query" ? "wide-left" : ""}>
         <aside className="left">
-          {graph && (
+          <div className="tabs" role="tablist">
+            {TABS.map(([t, label]) => (
+              <button key={t} role="tab" className={tab === t ? "on" : ""} aria-selected={tab === t}
+                      onClick={() => setTab(t)} data-testid={`tab-${t}`}>{label}</button>
+            ))}
+          </div>
+          {tab === "query" && (
+            <QueryPanel text={question} onText={setQuestion} onOverlay={setOverlay} offscreen={offscreen}
+                        onPick={pick} onOpenDoc={setDocOpen} />
+          )}
+          {tab === "funnel" && <p className="note">문서마다 연결 현황 — 가운데 표. 그래프로 돌아가려면 「그래프」 탭.</p>}
+          {tab === "graph" && graph && (
             <Controls graph={graph} axis={axis} onAxis={setAxis} rels={rels} onRels={setRels}
                       search={search} onSearch={setSearch} hits={hits}
                       fullLabels={fullLabels} onFullLabels={setFullLabels}
@@ -162,9 +206,12 @@ export default function App() {
           <div id="canvas" ref={canvasRef} />
           {error && <div className="canvas-error">{error}</div>}
           {!graph && !error && <div className="canvas-error muted">그래프를 받는 중…</div>}
+          {tab === "funnel" && <div className="canvas-cover"><FunnelView /></div>}
         </section>
         <aside className="right">
-          <Detail graph={graph} selected={selected} onPick={pick} />
+          {docOpen
+            ? <DocPanel docId={docOpen} onBack={() => setDocOpen(null)} onPick={pick} />
+            : <Detail graph={graph} selected={selected} onPick={pick} onAsk={askAbout} onOpenDoc={setDocOpen} />}
         </aside>
       </main>
     </div>
