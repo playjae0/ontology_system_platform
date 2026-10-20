@@ -1,8 +1,12 @@
 /* 이 파일은 시스템 뷰어의 힘 배치 워커를 **옮겨 온 것**이다 — 불러오기가 아니라 복사 · 플랫폼이 소유한다(명세 §2-2).
  *   출처: playjae0/ontology_system @ 4af5505 · cli/viewer/static/force_worker.js
  *   플랫폼 사본에 더한 것 둘 (P1.5 · 명세 §5.1 끌기 배치):
- *     ① `start`의 선택 칸 `anchor: {k}` — 노드마다 제자리 용수철 세기. 있으면 시작 좌표를 제자리로 잡고 중력 다음에
- *        `−k·m·(지금 − 제자리)`를 더한다. **없으면 시스템 원본과 한 글자도 다르지 않게 돈다**(전체 배치는 바뀌지 않는다).
+ *     ① `start`의 선택 칸 `anchor: {k}` — 노드마다 제자리 용수철 세기. 있으면 중력 다음에 `−k·m·(지금 − 제자리)`를 더한다.
+ *        **제자리는 시작 순간의 알짜 힘을 상쇄하는 자리다**(P1.6 · B-01): 시작 좌표에서 알짜 힘 F(반발 + 중력 + 끌림)를 한 번 재고
+ *        제자리 = 지금 − F / (k·m) — 시작 순간이 평형이라 앞선 끌기가 남긴 힘이 풀리지 않는다(고정된 점 · k 0은 제자리 = 지금).
+ *        끌기 배치에서는 걸음(speed)을 `cfg.dragMaxSpeed` 이하로 묶는다(P1.6 · DECISIONS P-28): 평형 근처에서 ForceAtlas2의 걸음이
+ *        커져 노드가 떨리고, 그 떨림이 쉰 자리를 바꿔 「끌지 않은 곳이 흐른다」로 보였다.
+ *        **없으면 시스템 원본과 같은 계산으로 돈다**(전체 배치는 바뀌지 않는다 — 힘 계산을 `forces()` 하나로 묶었을 뿐 순서 그대로).
  *     ② 메시지 `cool {iters}` — 반복 상한을 「지금 반복 수 + iters」로 바꾸고, 쉬고 있으면 다시 돈다(놓은 뒤 식힘).
  *   위 두 가지만 더했다. 다루는 쪽은 `force.ts`다(시스템 `layout.js`의 forceStart · forcePause · forcePin을 옮겼다).
  */
@@ -37,7 +41,21 @@ function init(m) {
   EA = Int32Array.from(m.edges.map((e) => e[0])); EB = Int32Array.from(m.edges.map((e) => e[1]));
   cfg = m.cfg; iter = 0; maxIter = cfg.maxIter; speed = 1; speedEff = 1; runMs = 0;
   AK = m.anchor ? Float64Array.from(m.anchor.k) : null;
-  if (AK) { AX = Float64Array.from(X); AY = Float64Array.from(Y); }   // 시작 좌표가 제자리
+  if (AK) anchorAtBalance();
+}
+
+/** 제자리(플랫폼 사본 ①) — 시작 좌표에서 알짜 힘(용수철 빼고)을 한 번 재서, 용수철이 그 힘을 정확히 상쇄하는 자리.
+ *  반복 한 번의 힘 계산과 같은 계산이고 좌표는 움직이지 않는다. 잰 뒤 DX·DY는 0으로(첫 반복의 흔들림 계산에 섞이지 않게). */
+function anchorAtBalance() {
+  AX = Float64Array.from(X); AY = Float64Array.from(Y);
+  for (let i = 0; i < N; i++) { DX[i] = 0; DY[i] = 0; }
+  forces(false);
+  for (let i = 0; i < N; i++) {
+    if (FIX[i] || !(AK[i] > 0)) continue;
+    const km = AK[i] * M[i];
+    AX[i] = X[i] - DX[i] / km; AY[i] = Y[i] - DY[i] / km;
+  }
+  for (let i = 0; i < N; i++) { DX[i] = 0; DY[i] = 0; }
 }
 
 /** 사분 나무 — 칸마다 질량 · 질량 중심 · 자식 넷(잎은 점 하나 · 같은 자리에 쌓이면 한 칸에 모은다). */
@@ -83,8 +101,8 @@ function repulse(root) {
   for (let i = 0; i < N; i++) walk(root, i);
 }
 
-function step() {
-  for (let i = 0; i < N; i++) { OX[i] = DX[i]; OY[i] = DY[i]; DX[i] = 0; DY[i] = 0; }
+/** 힘을 DX·DY에 더한다 — 반발 · 중력 · (springs면) 제자리 용수철 · 끌림. 순서는 시스템 원본 그대로. */
+function forces(springs) {
   repulse(tree());
   // 중력 — 질량에 비례하는 일정한 크기로 원점을 향해(덩어리를 붙잡는다)
   const kg = cfg.gravity;
@@ -93,7 +111,7 @@ function step() {
     if (d > 0) { const f = kg * M[i] / d; DX[i] -= X[i] * f; DY[i] -= Y[i] * f; }
   }
   // 제자리 용수철(플랫폼 사본 ①) — 끌기 배치에서만 · `−k·m·(지금 − 제자리)`
-  if (AK) {
+  if (springs && AK) {
     for (let i = 0; i < N; i++) { DX[i] -= AK[i] * M[i] * (X[i] - AX[i]); DY[i] -= AK[i] * M[i] * (Y[i] - AY[i]); }
   }
   // 끌림 — 선형
@@ -101,6 +119,11 @@ function step() {
     const a = EA[k], b = EB[k], dx = X[a] - X[b], dy = Y[a] - Y[b];
     DX[a] -= dx; DY[a] -= dy; DX[b] += dx; DY[b] += dy;
   }
+}
+
+function step() {
+  for (let i = 0; i < N; i++) { OX[i] = DX[i]; OY[i] = DY[i]; DX[i] = 0; DY[i] = 0; }
+  forces(true);
   // 적응 속도 — 전역 흔들림/견인(ForceAtlas2 식 그대로)
   let swing = 0, traction = 0;
   for (let i = 0; i < N; i++) {
@@ -114,6 +137,7 @@ function step() {
   const target = swing > 0 ? jt * speedEff * traction / swing : speed;
   if (swing > jt * traction) { if (speedEff > minSE) speedEff *= 0.7; } else if (speed < 1000) speedEff *= 1.3;
   speed = speed + Math.min(target - speed, 0.5 * speed);
+  if (AK && cfg.dragMaxSpeed) speed = Math.min(speed, cfg.dragMaxSpeed);   // 끌기 배치의 걸음 상한(플랫폼 사본 ①)
   for (let i = 0; i < N; i++) {
     if (FIX[i]) continue;
     const sw = M[i] * Math.hypot(DX[i] - OX[i], DY[i] - OY[i]);

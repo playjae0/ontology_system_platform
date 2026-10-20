@@ -6,7 +6,8 @@
  *
  * 배치는 두 가지다(명세 §5.1):
  *   · 전체 배치 `layout` — 처음 열 때 · 다시 배치 · 간격. `force.iterations`만큼 돌고 쉰다.
- *   · 끌기 배치 `drag`   — 끌기를 시작한 순간의 좌표를 제자리로 잡고, 끄는 노드에서 멀수록 센 용수철로 붙잡는다.
+ *   · 끌기 배치 `drag`   — 끄는 노드에서 멀수록 센 용수철로 제자리에 붙잡는다. 제자리는 시작 순간의 알짜 힘을 용수철이
+ *                         정확히 상쇄하는 자리다(워커가 잰다 · P1.6 B-01) — 앞선 끌기가 남긴 힘이 다음 끌기에서 풀리지 않는다.
  *                         누르는 동안 반복 상한 없이 돌고, 놓으면 `COOL_ITER`만큼 식히고 쉰다.
  */
 import type { LayoutState } from "../types";
@@ -30,6 +31,9 @@ export const SPRING_GROWTH = 3;
 export const SPRING_MAX = 1;
 /** 놓은 뒤 식히는 반복 수. */
 export const COOL_ITER = 300;
+/** 끌기 배치의 걸음(speed) 상한 — 평형 근처의 떨림을 막는다(DECISIONS P-28 · 요청문 밖의 가결정).
+ *  mock 실측: 상한 없이 허브를 끈 뒤 2px 끌기의 흐름 1.6~3.0% → 상한 1에서 0.1~0.3% · 따라오는 비율·빠르기는 그대로. */
+export const DRAG_MAX_SPEED = 1;
 
 /** 홉 수 → 용수철 세기. */
 export function springOf(hops: number, k0: number): number {
@@ -43,6 +47,7 @@ export interface ForceRun {
   scaling: number;
   gravity: number;
   iterations: number;
+  maxSpeed?: number;               // 끌기 배치만 — 걸음 상한
 }
 
 type FrameFn = (x: Float64Array, y: Float64Array, ids: string[]) => void;
@@ -81,7 +86,8 @@ export class ForceLayout {
     this.launch(run, "layout", null);
   }
 
-  /** 끌기 배치 — 지금 좌표를 제자리로, 끄는 노드에서 멀수록 센 용수철. 반복 상한 없이 돈다(놓을 때 `release`).
+  /** 끌기 배치 — 지금 좌표에서 출발, 끄는 노드에서 멀수록 센 용수철(제자리는 워커가 알짜 힘을 상쇄하도록 잡는다).
+   *  반복 상한 없이 돈다(놓을 때 `release`).
    *  끄는 노드에서 닿지 않는 노드는 이 끌기 동안 고정한다. */
   startDrag(node: string, positions: Record<string, XY>, pinned: Set<string>, k0: number,
             scaling: number, gravity: number): void {
@@ -90,7 +96,7 @@ export class ForceLayout {
     fixed.add(node);
     this.ids.forEach((id, i) => { if (hops[i] < 0) fixed.add(id); });
     const k = hops.map((h) => (h < 0 ? 0 : springOf(h, k0)));
-    this.launch({ positions, fixed, scaling, gravity, iterations: Infinity }, "drag", k);
+    this.launch({ positions, fixed, scaling, gravity, iterations: Infinity, maxSpeed: DRAG_MAX_SPEED }, "drag", k);
   }
 
   /** 놓았다 — 끌기 배치를 `COOL_ITER`만큼 식히고 쉬게 한다. */
@@ -146,7 +152,8 @@ export class ForceLayout {
       type: "start",
       x: this.ids.map((id) => at(id).x), y: this.ids.map((id) => at(id).y),
       m: this.mass, edges: this.edges, fixed: this.ids.map((id) => (run.fixed.has(id) ? 1 : 0)),
-      cfg: { ...FORCE_CFG, scaling: run.scaling, gravity: run.gravity, maxIter: run.iterations },
+      cfg: { ...FORCE_CFG, scaling: run.scaling, gravity: run.gravity, maxIter: run.iterations,
+             ...(run.maxSpeed ? { dragMaxSpeed: run.maxSpeed } : {}) },
       ...(springs ? { anchor: { k: springs } } : {}),
     });
   }
