@@ -28,6 +28,11 @@ export interface ViewState {
   selected: string | null;
 }
 
+/** 질의 겹쳐 보기 — 칠할 노드(종류)와 굵게 할 엣지(`src|rel|dst`). 응답의 trace에 적힌 것만 담는다(명세 §6.1). */
+export type OverlayKind = "link" | "pick" | "reach";
+export interface Overlay { nodes: Record<string, OverlayKind>; edges: Set<string> }
+export const edgeKey = (src: string, rel: string, dst: string) => `${src}|${rel}|${dst}`;
+
 /** 관계 이름은 확대했을 때만 — 카메라 비율이 이보다 작으면(DECISIONS P-07). */
 const EDGE_LABEL_RATIO = 0.5;
 const CROSS_CURVATURE = 0.3;
@@ -65,6 +70,7 @@ export class GraphView {
   private press: { node: string; moved: boolean; dragLayout: boolean } | null = null;
   private dragging: string | null = null;
   private follow = FOLLOW_DEFAULT;                // 「끌 때 따라오는 범위」의 k₀ — 다음 끌기부터
+  private overlay: Overlay | null = null;         // 질의 겹쳐 보기 — 리듀서만 바꾼다
   private zoomedIn = false;
   private scaling: number;
   private readonly gravity: number;
@@ -137,6 +143,12 @@ export class GraphView {
     this.sigma.refresh({ skipIndexation: true });
   }
 
+  /** 질의 겹쳐 보기 — 색·굵기만(리듀서) · 배치를 다시 하지 않는다. null이면 지운다. */
+  setOverlay(o: Overlay | null): void {
+    this.overlay = o;
+    this.sigma.refresh({ skipIndexation: true });
+  }
+
   /** 보이는(숨김 제외) 노드·엣지 id — 리듀서와 같은 판정이다. */
   visible(): { nodes: string[]; edges: string[] } {
     const nodes = this.graph.nodes();
@@ -202,6 +214,8 @@ export class GraphView {
     const res: Partial<NodeDisplayData> & { labelScale: number } = {
       ...a, color: colorOf(axisValue(n, v.axis)), label: v.fullLabels ? n.name : shortName(n.name), zIndex: 1,
     };
+    const ov = this.overlay?.nodes[id];
+    if (ov) Object.assign(res, { color: COLOR[ov], zIndex: 2 });   // 질의 겹쳐 보기 — 색만
     const q = v.search.trim().toLowerCase();
     if (q) {
       if (searchHit(n, q)) {
@@ -225,6 +239,7 @@ export class GraphView {
     const res: Partial<EdgeDisplayData> = { ...a, label: this.zoomedIn ? e.rel : "" };
     if (!edgeShown(e, this.view.rels)) return { ...res, hidden: true };
     if (this.hover && e.src !== this.hover && e.dst !== this.hover) res.color = COLOR.faint;
+    if (this.overlay?.edges.has(edgeKey(e.src, e.rel, e.dst))) Object.assign(res, { color: COLOR.path, size: 3, zIndex: 2 });
     return res;
   }
 

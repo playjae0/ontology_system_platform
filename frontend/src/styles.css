@@ -74,3 +74,29 @@ input[type=range] { width: 100%; }
 .rel { background: var(--panel); border-radius: 3px; padding: 0 4px; font-size: 12px; }
 .rel.cross { color: var(--cross); font-weight: bold; }
 .range-ends { display: flex; justify-content: space-between; margin-top: -4px; }
+
+/* ── P2 — 탭 · 질의 · 문서 · 연결 현황 (글과 목록 — 꾸밈 없이 · 명세 §2-10) ─────────── */
+main.wide-left { grid-template-columns: 440px 1fr 330px; }
+.tabs { display: flex; gap: 4px; margin-bottom: 8px; }
+.tabs button.on { background: var(--panel2); font-weight: bold; }
+.query input[type=search] { flex: 1; }
+.qstatus { margin: 6px 0; font-size: 12px; }
+.qstatus .on { font-weight: bold; }
+.row.wrap { flex-wrap: wrap; }
+.card { border: 1px solid var(--panel2); border-radius: 4px; padding: 4px 6px; margin: 3px 0; background: var(--bg); }
+.card.used { border-color: #e0a95c; background: #fff7ec; }
+.card.dropped { color: var(--dim); background: var(--panel); }
+.card.err { border-color: #f1b0a8; background: var(--warn-bg); color: var(--warn-fg); white-space: pre-wrap; }
+.card summary { cursor: pointer; }
+pre.src, pre.answer { white-space: pre-wrap; word-break: break-all; margin: 4px 0; font: inherit; font-size: 12px; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.chip { display: inline-block; border: 1px solid var(--line); border-radius: 10px; padding: 0 8px; cursor: pointer;
+        font-size: 12px; margin: 2px 4px 2px 0; }
+.chip.pick { border-style: dashed; border-color: #cc00cc; }
+.note.warn { color: var(--warn-fg); }
+.legend-inline { font-size: 12px; gap: 10px; }
+.canvas-cover { position: absolute; inset: 0; overflow: auto; background: var(--bg); padding: 10px 16px; z-index: 5; }
+table.grid { border-collapse: collapse; }
+table.grid th, table.grid td { border: 1px solid var(--panel2); padding: 2px 8px; text-align: right; }
+table.grid td:first-child, table.grid th:first-child { text-align: left; }
+table.grid tr.total th { background: var(--panel); }
