@@ -28,12 +28,19 @@ export type Axis = (typeof AXES)[number];
 export const axisValue = (n: GNode, ax: Axis): string =>
   n[ax] == null || n[ax] === "" ? "—" : String(n[ax]);
 
-/* 크기 — tier 계단(main > sub > detail > 골격 밖). 라벨 글자도 같은 계단. */
-export const TIER_SIZE: Record<string, number> = { main: 16, sub: 10, detail: 6 };
-export const SIZE_OTHER = 4;
+/* 크기 — 연결 수(명세 §5.2 [P3]). 원의 넓이가 연결 수에 비례한다:
+ *   반지름 = 최소 + (최대 − 최소) × √(연결 수 ÷ 그래프의 최대 연결 수)
+ * 연결 수는 받을 때 한 번 센다(`explore.ts` degreeOf) — 토글·깊이·거르기로 바뀌지 않는다.
+ * 최소·최대 픽셀은 이 한 자리다(가결정 — DECISIONS P-40). */
+export const SIZE_MIN = 3;
+export const SIZE_MAX = 18;
+export function sizeOf(degree: number, maxDegree: number): number {
+  if (!(maxDegree > 0)) return SIZE_MIN;
+  return SIZE_MIN + (SIZE_MAX - SIZE_MIN) * Math.sqrt(Math.max(0, degree) / maxDegree);
+}
+/* 라벨 글자 크기는 tier 계단 그대로(main > sub > detail > 골격 밖). */
 const TIER_LABEL: Record<string, number> = { main: 1.45, sub: 1.15, detail: 1.0 };
 const LABEL_OTHER = 0.9;
-export const sizeOf = (n: GNode) => (n.tier && TIER_SIZE[n.tier]) || SIZE_OTHER;
 export const labelScaleOf = (n: GNode) => (n.tier && TIER_LABEL[n.tier]) || LABEL_OTHER;
 
 /* 라벨 — 이름 사슬의 끝 조각(`a::b::c` → `c`). */
@@ -45,9 +52,7 @@ export function shortName(name: string): string {
 /* 골격 노드는 시스템 어휘 `status = seed`다(명세 §2-7 — 써도 되는 어휘). */
 export const isSkeleton = (n: GNode) => n.status === "seed";
 
-/* 보이기 — 판정은 이 두 함수뿐이다(그리기 · 머리 줄의 수 · 확인용 손잡이가 같이 쓴다). */
-/** 닻에 없는 노드(연결 없는 노드)는 숨긴다(명세 §5.3 [P1]). */
-export const nodeShown = (n: GNode, anchor: Record<string, unknown>) => n.id in anchor;
+/* 보이기 — 노드는 `explore.ts`의 visibleNodes 하나가 정한다(명세 §5.4 [P3]). 엣지는 아래 하나. */
 /** 층을 건너는 엣지는 관계 토글과 무관하게 언제나 그린다(명세 §5.2). */
 export const edgeShown = (e: GEdge, rels: Set<string>) => e.cross || rels.has(e.rel);
 

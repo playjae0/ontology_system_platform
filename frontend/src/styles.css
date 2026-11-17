@@ -100,3 +100,18 @@ table.grid { border-collapse: collapse; }
 table.grid th, table.grid td { border: 1px solid var(--panel2); padding: 2px 8px; text-align: right; }
 table.grid td:first-child, table.grid th:first-child { text-align: left; }
 table.grid tr.total th { background: var(--panel); }
+
+/* ── P3 탐색 — 카테고리별 깊이 표 · 칩 (명세 §5.4) ───────────────────────────── */
+.controls table.depths { width: 100%; border-collapse: collapse; margin: 4px 0; }
+.controls table.depths td { padding: 2px 2px; vertical-align: middle; }
+.controls table.depths td.cat { max-width: 86px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.controls table.depths td.steps { white-space: nowrap; }
+.controls table.depths td.steps button { padding: 1px 5px; min-width: 22px; font-size: 11px; }
+.controls table.depths td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.controls button.on { background: var(--fg); color: #fff; border-color: var(--fg); }
+.xchips { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0; }
+.xchip { display: inline-flex; align-items: center; gap: 2px; max-width: 100%; border: 1px solid var(--line);
+        border-radius: 10px; padding: 1px 2px 1px 8px; font-size: 11px; background: #f4f6f9; }
+.xchip .xchip-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.xchip button { border: none; background: none; padding: 0 4px; cursor: pointer; }
+.note.err { color: #b3261e; }
