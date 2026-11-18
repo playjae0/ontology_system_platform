@@ -1,6 +1,8 @@
-/* 머리 줄 — 시스템 모드 · 상태 루트 · 시스템 커밋 · 층 · 문서 수 · 보이는 노드/엣지 · 힘 상태 · 질의 벡터 준비 줄 (명세 §5.6). */
+/* 머리 줄 — 시스템 모드 · 상태 루트 · 시스템 커밋 · 층 · 문서 수 · 보이는 노드/엣지 · 힘 상태 · 그리기 장치 · 질의 벡터 준비 줄
+ * (명세 §5.6). */
 import type { Health, LayoutState, PlatformStatus } from "../types";
 import { COOL_ITER } from "../graph/force";
+import { type Renderer, rendererWord } from "../graph/renderer";
 
 interface Props {
   health: Health | null;
@@ -8,6 +10,7 @@ interface Props {
   counts: { nodes: number; nodesAll: number; edges: number; edgesAll: number } | null;
   layout: LayoutState;
   vectorLine: string;
+  renderer: Renderer;
 }
 
 /** 시스템 커밋을 모르면(zip으로 받은 폴더) 폴더 이름을 보인다. */
@@ -21,6 +24,7 @@ function commitOrFolder(p: PlatformStatus | null): string {
 /** 힘 상태 — 전체 배치: 진행/쉼 + 반복 · 끌기 배치: 끌기(상한 없음 — 수를 보이지 않는다) → 식힘 n/300 → 쉼. 멈춤은 둘 다. */
 function layoutWord(s: LayoutState): string {
   if (s.paused) return "멈춤";
+  if (s.kind === "settle") return s.running ? `자리 잡기 ${s.iterations}/${s.max}` : "쉼";
   if (s.kind === "drag") {
     if (!s.running) return "쉼";
     if (!Number.isFinite(s.max)) return "끌기";
@@ -33,7 +37,7 @@ function layoutWord(s: LayoutState): string {
 
 // 머리 줄은 한 줄 · 높이가 늘 같다 — 힘 상태처럼 길이가 바뀌는 글자가 줄바꿈을 바꾸면 캔버스가 위아래로 뛰어
 // 끄는 순간 노드가 손에서 빠진다(DECISIONS P-22). 긴 글자(상태 폴더 · 벡터 줄)는 줄여 보이고 전체는 툴팁에.
-export function Header({ health, platform, counts, layout, vectorLine }: Props) {
+export function Header({ health, platform, counts, layout, vectorLine, renderer }: Props) {
   return (
     <header className="head">
       <span className="title">온톨로지 시스템 플랫폼</span>
@@ -47,6 +51,9 @@ export function Header({ health, platform, counts, layout, vectorLine }: Props) 
       </span>
       <span className="item layout-state" data-testid="layout-state">
         힘 {layoutWord(layout)}
+      </span>
+      <span className="item" data-testid="renderer" title={`WebGL 장치 — ${renderer.name ?? "이름을 못 읽었다"}`}>
+        그리기 {rendererWord(renderer)}
       </span>
       <span className="item muted shrink vector" data-testid="vector-line" title={vectorLine}>{vectorLine || "벡터 —"}</span>
     </header>

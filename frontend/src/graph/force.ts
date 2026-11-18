@@ -29,6 +29,8 @@ export const SPRING_FLAT_HOPS = 2;
 export const SPRING_GROWTH = 3;
 /** 상한 — 엣지 하나의 끌림과 같은 크기. **빼지 않는다**: 없으면 긴 사슬에서 계산이 튄다(명세 §5.1 실측). */
 export const SPRING_MAX = 1;
+/** 보이는 노드가 늘 때 이미 있던 노드를 붙잡는 용수철 세기 — 끌기 배치의 상한과 같은 값(DECISIONS P-41). */
+export const SETTLE_SPRING = SPRING_MAX;
 /** 놓은 뒤 식히는 반복 수. */
 export const COOL_ITER = 300;
 /** 끌기 배치의 걸음(speed) 상한 — 평형 근처의 떨림을 막는다(DECISIONS P-28 · 요청문 밖의 가결정).
@@ -99,6 +101,17 @@ export class ForceLayout {
     this.launch({ positions, fixed, scaling, gravity, iterations: Infinity, maxSpeed: DRAG_MAX_SPEED }, "drag", k);
   }
 
+  /** 보이는 노드가 늘었다(명세 §5.1 [P3]) — 새 노드는 자유롭게, 이미 있던 노드는 끌기 배치와 같은 제자리 용수철
+   *  (시작 순간이 평형 — P1.6)로 붙잡고 `COOL_ITER`만큼 돈다. 새 노드가 자리 잡는 동안 먼 곳은 움직이지 않는다.
+   *  세기는 끌기 배치의 k(h)가 아니라 모두 상한 `SETTLE_SPRING`이다(DECISIONS P-41) — k(h)는 끄는 노드 근처가 따라오게
+   *  일부러 약한데, 자리 잡기에는 끄는 노드가 없다. 합성 실측: k(h)면 기존 노드가 반경의 13~25%를 움직였고 상한이면 1% 미만. */
+  startSettle(fresh: Set<string>, positions: Record<string, XY>, pinned: Set<string>,
+              scaling: number, gravity: number): void {
+    const k = this.ids.map((id) => (fresh.has(id) ? 0 : SETTLE_SPRING));
+    this.launch({ positions, fixed: new Set(pinned), scaling, gravity, iterations: COOL_ITER,
+                  maxSpeed: DRAG_MAX_SPEED }, "settle", k);
+  }
+
   /** 놓았다 — 끌기 배치를 `COOL_ITER`만큼 식히고 쉬게 한다. */
   release(): void {
     if (!this.worker || this.state.kind !== "drag") return;
@@ -160,11 +173,19 @@ export class ForceLayout {
 
   /** 끄는 노드에서 넓이 우선으로 센 홉 수 — 엣지 방향은 보지 않는다. 닿지 않으면 −1. */
   private hopsFrom(node: string): number[] {
+    return this.hopsFromAll(new Set([node]));
+  }
+
+  /** 여러 점에서 동시에 넓이 우선으로 센 홉 수(가장 가까운 점까지) — 닿지 않으면 −1. */
+  private hopsFromAll(starts: Set<string>): number[] {
     const hops = this.ids.map(() => -1);
-    const start = this.at.get(node);
-    if (start === undefined) return hops;
-    hops[start] = 0;
-    const queue = [start];
+    const queue: number[] = [];
+    for (const id of starts) {
+      const s = this.at.get(id);
+      if (s === undefined || hops[s] === 0) continue;
+      hops[s] = 0;
+      queue.push(s);
+    }
     for (let q = 0; q < queue.length; q++) {
       const i = queue[q];
       for (const j of this.adj[i]) {

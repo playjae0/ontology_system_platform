@@ -7,7 +7,6 @@ import { useEffect, useMemo, useState } from "react";
 
 import { getJSON } from "../api";
 import type { GEdge, GNode, Graph, NodeEvidence } from "../types";
-import { nodeShown } from "../graph/style";
 import { MissingCard } from "./MissingCard";
 
 interface Props {
@@ -16,6 +15,9 @@ interface Props {
   onPick: (id: string) => void;
   onAsk: (name: string) => void;          // 「이 노드로 질문」 — 질문 칸에 넣고 질의 탭으로(전송은 사람이)
   onOpenDoc: (docId: string) => void;
+  shown: Set<string>;                     // 보이는 노드(명세 §5.4) — 「화면에 없음」 · 「화면에 m」
+  degree: Map<string, number>;            // 연결 수 — 엣지 전부로 한 번 센 것(명세 §5.2)
+  onExpand: (id: string) => void;         // 「여기서 펼치기」(명세 §5.4)
 }
 
 /** [칸 이름, 보이는 이름] — 화면 표기와 확인 스크립트가 같은 칸 이름(`data-field`)을 쓴다. */
@@ -30,7 +32,7 @@ const SKELETON_DOC = "seed";
 
 const show = (v: unknown) => (v === null || v === undefined || v === "" ? "—" : String(v));
 
-export function Detail({ graph, selected, onPick, onAsk, onOpenDoc }: Props) {
+export function Detail({ graph, selected, onPick, onAsk, onOpenDoc, shown, degree, onExpand }: Props) {
   const byId = useMemo(() => new Map((graph?.nodes ?? []).map((n) => [n.id, n])), [graph]);
   const node = selected ? byId.get(selected) : undefined;
   const adjacent: GEdge[] = useMemo(
@@ -43,7 +45,14 @@ export function Detail({ graph, selected, onPick, onAsk, onOpenDoc }: Props) {
   return (
     <div className="detail" data-testid="detail">
       <h2 data-testid="detail-name">{node.name}</h2>
-      <button onClick={() => onAsk(node.name)} data-testid="ask-node">이 노드로 질문</button>
+      <div className="row">
+        <button onClick={() => onAsk(node.name)} data-testid="ask-node">이 노드로 질문</button>
+        <button onClick={() => onExpand(node.id)} data-testid="expand-node">여기서 펼치기</button>
+      </div>
+      <p className="note" data-testid="degree">
+        연결 수 {degree.get(node.id) || 0} · 화면에 {
+          adjacent.filter((e) => shown.has(node.id) && shown.has(e.src === node.id ? e.dst : e.src)).length}
+      </p>
       <table>
         <tbody>
           {FIELDS.map(([k, label]) => (
@@ -66,7 +75,7 @@ export function Detail({ graph, selected, onPick, onAsk, onOpenDoc }: Props) {
         const out = e.src === node.id;
         const otherId = out ? e.dst : e.src;
         const other = byId.get(otherId);
-        const onScreen = other ? nodeShown(other, graph.anchor) : false;
+        const onScreen = other ? shown.has(other.id) : false;
         return (
           <div className="adj" key={e.id} data-testid="adjacent">
             <span className="muted">{out ? "→" : "←"}</span>{" "}

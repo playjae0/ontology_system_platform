@@ -80,7 +80,7 @@ export interface LayoutState {
   paused: boolean;          // 사람이 「멈춤」을 눌렀다
   iterations: number;       // 이번 판에서 돈 반복 수
   max: number;              // 이번 판의 반복 상한(끌기 배치는 놓을 때까지 Infinity)
-  kind: "layout" | "drag";  // 전체 배치 / 끌기 배치
+  kind: "layout" | "drag" | "settle";  // 전체 배치 / 끌기 배치 / 보이는 노드가 늘 때 자리 잡기(P3)
 }
 
 /* ── P2 — 질의 · 노드 근거 · 문서 · 연결 현황 (명세 §4 · §6) ───────────────────────── */
