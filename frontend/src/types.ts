@@ -22,6 +22,7 @@ export interface GNode {
   docs: string[];
   prov: string;             // provenance 앞 4개를 쉼표로 이은 글자
   queue: string | null;
+  values?: string[];        // 접은 값 줄(시스템 B199) — 있을 때만(칸 확인 목록에 없다 · 명세 §4)
 }
 
 export interface GEdge {
@@ -154,6 +155,7 @@ export interface NodeEvidence {
                  steps: { rel: string; src: string; src_name: string; dst: string; dst_name: string }[] } | null;
   evidence: { chunk_id: string; doc_id: string; locator?: string; section?: string; image?: boolean; text?: string }[];
   evidence_total: number;
+  record?: Record<string, unknown>;   // 원 레코드(시스템 B206) — 있을 때만(명세 §5.5 [P4])
   landed: { doc_id: string; locator?: string; surface?: string; target?: string; verdict?: string; path?: string;
             from?: string | null; attached?: { rel: string; other: string; path?: string; dir?: string }[] }[];
 }

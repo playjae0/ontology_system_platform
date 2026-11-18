@@ -2,8 +2,8 @@
  *
  * 보이는 노드 = 골격(seed) ∪ 카테고리별 깊이에 드는 노드 ∪ 펼친 노드 ∪ 질의로 끌어온 노드,
  *               그리고 그 노드들의 골격까지의 길(`anchor.host`를 골격까지 따라간 노드).
- * 닻이 없는 노드(연결 없는 노드)는 이 함수 밖이다(명세 §5.3). 그리기 · 머리 줄의 수 · 범례 · 찾기 · 화면에 없는 노드 수가
- * 모두 이 함수 하나를 쓴다. 깊이는 시스템이 준 `anchor[id].hops`다 — 화면이 다시 세지 않는다(명세 §2-3).
+ * 닻이 없는 노드(연결 없는 노드)는 이 함수 밖이다(명세 §5.3). 화면의 최종 「보이기」는 이 함수에 거르기를 더한
+ * `filters.ts`의 `shownNodes` 하나다([P4]). 깊이는 시스템이 준 `anchor[id].hops`다 — 화면이 다시 세지 않는다(명세 §2-3).
  */
 import type { Graph, GNode } from "../types";
 import { isSkeleton } from "./style";
@@ -65,7 +65,7 @@ export function exploreMode(e: Explore): "all" | "skeleton" | "custom" {
   return "custom";
 }
 
-/** 보이는 노드 — 이 화면의 「보이기」 판정은 이 함수 하나다. */
+/** 탐색이 정하는 보이는 노드 — 거르기 전([P4] 최종 판정은 `filters.ts`의 `shownNodes`). */
 export function visibleNodes(g: Graph, e: Explore): Set<string> {
   const byId = new Map(g.nodes.map((n) => [n.id, n]));
   const out = new Set<string>();
@@ -100,11 +100,13 @@ export function drawnByCategory(g: Graph, shown: Set<string>): Map<string, numbe
   return cnt;
 }
 
-/** 칩 하나를 더했을 때(같은 열쇠의 칩은 바꾼다) 새로 보이는 수. */
-export function withChip(g: Graph, e: Explore, chip: Omit<Chip, "added">): Explore {
+/** 칩 하나를 더했을 때(같은 열쇠의 칩은 바꾼다) 새로 보이는 수.
+ *  `vis`는 보이는 노드를 정하는 함수 — 거르기가 있으면 거른 뒤의 수를 센다([P4] `filters.ts`의 `shownNodes`). */
+export function withChip(g: Graph, e: Explore, chip: Omit<Chip, "added">,
+                         vis: (e: Explore) => Set<string> = (x) => visibleNodes(g, x)): Explore {
   const rest = e.chips.filter((c) => c.key !== chip.key);
-  const before = visibleNodes(g, { ...e, chips: rest });
-  const after = visibleNodes(g, { ...e, chips: [...rest, { ...chip, added: 0 }] });
+  const before = vis({ ...e, chips: rest });
+  const after = vis({ ...e, chips: [...rest, { ...chip, added: 0 }] });
   return { ...e, chips: [...rest, { ...chip, added: after.size - before.size }] };
 }
 

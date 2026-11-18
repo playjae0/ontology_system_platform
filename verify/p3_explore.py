@@ -2,8 +2,11 @@
 """P3 완료판정 ⓐ~ⓜ — 탐색(골격 먼저 · 카테고리별 깊이 · 펼치기 · 질의 끌어오기) · 연결 수 크기 · 그리기 부하.
 
     python verify/p3_explore.py --chromium /opt/pw-browsers/chromium              # ⓐ~ⓘ · ⓛ · ⓜ
-    python verify/p3_explore.py --only c --chromium …                              # 전제 12 — 지금 코드로 ⓒ만(착수 전 수치)
-    python verify/p3_explore.py --before 4.21 --chromium …                         # ⓒ를 착수 전 평균(초)과 비교
+    python verify/p3_explore.py --only c --chromium …                              # ⓒ만 — 걸음 수치와 평균(판정 없음)
+    python verify/p3_explore.py --before 4.21 --chromium …                         # ⓒ도 재고 비교 수치를 함께 찍는다
+
+P4에서 고쳤다(명세 §8 2026-11-18): ⓒ는 판정에서 빼고 수치만 · ⓔ는 새 노드 ≤ 기존 노드인 펼침에서 < 2% ·
+많이 펼친 판(새 > 기존)은 「전체 배치였다」만 본다(ⓔ-많이).
 
 ⓙ(회귀)는 P1 확인 셋 · `p2_query.py`를, ⓚ는 `p16_drag.py --ref`를 따로 돌린다(요청문 §3).
 합성 그래프는 `p3_synth.py`가 레포 밖 임시 폴더에 만들고 끝나면 지운다 — 수는 **동작 확인용**이다(CLAUDE.md §3).
@@ -97,10 +100,9 @@ def check_c(p, args, rep: Report):
             avg = sum(times) / len(times)
             detail = (f"합성 {info['nodes']}노드(동작 확인용) · 허브 {hub[-6:]} 연결 {deg[hub]} · 걸음 "
                       + " ".join(f"{t:.2f}" for t in times) + f" · 평균 {avg:.2f}초")
-            if args.before:
-                rep.item("ⓒ", avg <= args.before / 3, f"{detail} · 착수 전 {args.before:.2f}초의 1/3 = {args.before / 3:.2f}")
-            else:
-                rep.item("ⓒ(착수 전)", avg > 1.0, f"{detail} — 전제 12: 한 걸음 평균 1초 넘음")
+            # 판정에서 뺐다 — 수치만 찍는다(명세 §8 2026-11-18 · 요청문 P4 ⑥). 판정은 사내 손맛.
+            ref = f" · 비교 {args.before:.2f}초" if args.before else ""
+            rep.item("ⓒ(수치)", True, f"{detail}{ref} — 동작 확인 · 판정은 사내 손맛")
             browser.close()
         finally:
             plat.stop()
@@ -265,7 +267,7 @@ def check_big(p, args, rep: Report, before: float | None):
             chip_n = int(chip.rsplit("+", 1)[1])
             after_pos = page.evaluate(JS_POSITIONS)
 
-            # ⓔ 펼칠 때 배치 — 4홉 이상 기존 노드의 평균 이동 / 반경 · 연결 쌍 ÷ 비연결 쌍 평균 거리
+            # ⓔ-많이 — 많이 펼친 판의 배치 종류(이동·쌍 거리는 참고로만 찍는다)
             hops = page.evaluate(JS_HOPS, hub)
             far = [i for i in before_set if hops.get(i, 99) >= 4 and i in after_pos]
             rad = rms_radius({i: before_pos[i] for i in before_set})
@@ -276,9 +278,12 @@ def check_big(p, args, rep: Report, before: float | None):
             non = [math.dist(after_pos[a], after_pos[b]) for k, a in enumerate(ids) for b in ids[k + 1:]
                    if (a, b) not in edges]
             pair = (sum(con) / len(con)) / (sum(non) / len(non))
-            rep.item("ⓔ", far_move < 0.01 and pair < 0.5,
-                     f"{tag} · 펼친 노드에서 4홉 이상 기존 노드 {len(far)}개 평균 이동 / 반경 {far_move:.3%} (< 1%) · "
-                     f"연결 쌍 ÷ 비연결 쌍 평균 거리 {pair:.3f} (< 0.5)")
+            # 많이 펼친 판(새 > 기존)은 「그림을 새로 잡는다」 — 배치 종류가 전체 배치였는지만 본다(명세 §5.1 · B-02 A).
+            kind1 = page.evaluate("() => window.__platform.layout.kind")
+            n_fresh, n_kept = len(added), len(before_set)
+            rep.item("ⓔ-많이", kind1 == "layout" and n_fresh > n_kept,
+                     f"{tag} · 새 {n_fresh} > 기존 {n_kept} → 배치 {kind1}(전체 배치여야 한다) · 참고: 4홉 이상 기존 노드 "
+                     f"{len(far)}개 평균 이동 / 반경 {far_move:.3%} · 연결 ÷ 비연결 {pair:.3f}")
 
             # 캡처 ① — 「골격만」에서 하나 펼친 화면
             CAPTURES.mkdir(parents=True, exist_ok=True)
@@ -311,8 +316,8 @@ def check_big(p, args, rep: Report, before: float | None):
                      f"{added == want_add} · 칩 「{chip}」 · 카메라 비율 {ratio0:.4f}→{ratio1:.4f} · 칩 × → 펼치기 전 {back} · "
                      f"찾기 「{hits_txt}」 → Enter → 그 노드와 이웃 {len(tnb)} 보임 {enter_ok}")
 
-            # ⓔ′(참고) 새 노드 ≤ 기존 노드인 펼치기 — ⑤의 「자리 잡기」 갈래(제자리 용수철 + 식힘)를 같은 잣대로 잰다.
-            #   ⓓ의 펼치기는 새 노드(이웃)가 기존(골격)보다 많아 ⑤ 규칙대로 전체 배치가 돈다 — BLOCKERS B-02.
+            # ⓔ 새 노드 ≤ 기존 노드인 펼치기 — ⑤의 「자리 잡기」 갈래(제자리 용수철 + 식힘)를 잰다.
+            #   ⓓ의 펼치기는 새 노드(이웃)가 기존(골격)보다 많아 ⑤ 규칙대로 전체 배치가 돈다 — 위 ⓔ-많이(B-02 A).
             page.click(f"[data-testid=depth-table] tr[data-cat='{cat}'] button[data-depth='1']")
             wait_settle(page)
             base2 = shown(page)
@@ -342,7 +347,8 @@ def check_big(p, args, rep: Report, before: float | None):
             con2 = [math.dist(pos3[a], pos3[b]) for a, b in e2]
             non2 = [math.dist(pos3[a], pos3[b]) for k, a in enumerate(ids2) for b in ids2[k + 1:] if (a, b) not in e2]
             pair2 = (sum(con2) / len(con2)) / (sum(non2) / len(non2))
-            rep.item("ⓔ′(참고)", mv2 < 0.01 and pair2 < 0.5 and kind2 == "settle" and 0 < len(fresh2) <= len(base2),
+            # 판정 자리(명세 §8 2026-11-18): 새 노드 ≤ 기존 노드인 펼침에서 먼 기존 노드 < 반경의 2% · 연결 ÷ 비연결 < 0.5.
+            rep.item("ⓔ", mv2 < 0.02 and pair2 < 0.5 and kind2 == "settle" and 0 < len(fresh2) <= len(base2),
                      f"{tag} · 「{cat}」 깊이 1(기존 {len(base2)})에서 {src2[-6:]}를 펼침 → 새 {len(fresh2)} · 배치 {kind2} · "
                      f"4홉 이상 기존 노드 {len(far2)}개 평균 이동 / 반경 {mv2:.3%} · 연결 ÷ 비연결 평균 거리 {pair2:.3f}")
             page.click("[data-testid=depth-skeleton]")
@@ -417,9 +423,9 @@ def check_big(p, args, rep: Report, before: float | None):
                 hubc = max(dg, key=lambda k: (dg[k], k))
                 times = drag_steps(page, hubc)
                 avg = sum(times) / len(times)
-                rep.item("ⓒ", avg <= before / 3,
+                rep.item("ⓒ(수치)", True,
                          f"{tag} · 허브 {hubc[-6:]} 연결 {dg[hubc]} · 걸음 " + " ".join(f"{t:.2f}" for t in times)
-                         + f" · 평균 {avg:.2f}초 · 착수 전 {before:.2f}초의 1/3 = {before / 3:.2f}")
+                         + f" · 평균 {avg:.2f}초 · 비교 {before:.2f}초 — 동작 확인 · 판정은 사내 손맛")
             rep.item("ⓜ", cap1.exists() and cap2.exists(), f"{cap1.relative_to(ROOT)} · {cap2.relative_to(ROOT)} (「합성」 띠)")
             rep.item("오류", not errors, f"페이지 오류 {len(errors)} {errors[:2]}")
             browser.close()

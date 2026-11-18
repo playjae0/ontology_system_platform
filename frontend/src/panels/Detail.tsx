@@ -1,6 +1,7 @@
 /* 노드 상세 — 그래프 노드 칸 · 인접 엣지(명세 §5.5 [P1]) + 근거 · 닻까지의 길 · 붙은 자리 · 나온 문서 · 이 노드로 질문([P2]).
  *
  * 그래프 칸은 `/api/graph`가 준 그대로 싣는다 — `aliases`·`attrs`는 개수, `prov`는 앞 4개를 이은 글자 그대로다.
+ * 값 줄(`values`)과 원 레코드(`/api/node/<id>`의 `record`)는 있을 때만 받은 그대로 싣는다([P4]).
  * 근거는 `/api/node/<id>`를 그대로 싣는다 — 시스템 뷰어 `explore.js`의 evidence 그리기를 참고했다(명세 §2-2).
  */
 import { useEffect, useMemo, useState } from "react";
@@ -63,6 +64,15 @@ export function Detail({ graph, selected, onPick, onAsk, onOpenDoc, shown, degre
           ))}
         </tbody>
       </table>
+
+      {node.values && node.values.length > 0 && (
+        <>
+          <h3>값 <span data-testid="value-count">{node.values.length}</span></h3>
+          <ul className="values" data-testid="values">
+            {node.values.map((v, i) => <li key={i} data-testid="value-line">{v}</li>)}
+          </ul>
+        </>
+      )}
 
       <h3>나온 문서 {docs.length}</h3>
       {docs.length === 0 && <p className="muted">(골격만 — 나온 문서 없음)</p>}
@@ -137,6 +147,13 @@ function Evidence({ id, onOpenDoc }: { id: string; onOpenDoc: (docId: string) =>
       ))}
       {ev.evidence_total > ev.evidence.length && (
         <p className="muted">{ev.evidence_total - ev.evidence.length}건 더 — 시스템 CLI로 본다</p>
+      )}
+
+      {ev.record && (
+        <details className="card" data-testid="record">
+          <summary>원 레코드</summary>
+          <pre className="src record" data-testid="record-json">{JSON.stringify(ev.record, null, 2)}</pre>
+        </details>
       )}
 
       <h3>붙은 자리 {ev.landed.length}</h3>

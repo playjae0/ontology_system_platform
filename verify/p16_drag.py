@@ -124,6 +124,10 @@ def main():
                           *browser_arg], cwd=ROOT, capture_output=True, text=True)
     block = run.stdout[run.stdout.rfind("== 결과 =="):]
     print(f"--- p15_drag.py (종료 코드 {run.returncode})\n{block}")
+    if run.returncode != 0:
+        # P3에서 한 번 있었던 간헐 실패의 원인을 보려는 것 — 고치지는 않는다(요청문 P4 ⑥).
+        tail = "\n".join(run.stdout.splitlines()[-40:])
+        print(f"--- p15_drag.py 표준 출력 끝 40줄\n{tail}\n--- p15_drag.py 표준 오류\n{run.stderr}")
     rep.item("ⓓ", run.returncode == 0, f"p15_drag.py 종료 코드 {run.returncode} — P1.5 ⓐ~ⓙ · 그 안의 ⓘ로 P1 확인 셋")
 
     # ⓔ README 사내 절 — 「개발 세션 전용」 절 앞까지 doctor 글자 0
