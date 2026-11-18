@@ -1,4 +1,4 @@
-/* 왼쪽 조절 — 카테고리별 깊이와 칩([P3]) · 찾기 · 배치(간격 · 멈춤/이어서 · 다시 배치) · 라벨 · 관계 토글 · 색 축과 범례 · 크기
+/* 왼쪽 조절 — 카테고리별 깊이와 칩([P3]) · 거르기(문서 · 축 값 · 연결 없는 노드 [P4]) · 찾기 · 배치(간격 · 멈춤/이어서 · 다시 배치) · 라벨 · 관계 토글 · 색 축과 범례 · 크기
  * (명세 §5.1~5.4). 보이는 노드는 받은 `shown` 하나로 센다(명세 §5.4 — 범례 · 찾기 · 깊이 표가 같은 값). */
 import { useEffect, useMemo, useState } from "react";
 
@@ -6,6 +6,7 @@ import type { Graph, LayoutState } from "../types";
 import { AXES, type Axis, axisValue, colorOf, COLOR, SIZE_MAX, SIZE_MIN, sizeOf } from "../graph/style";
 import { FOLLOW_STEPS } from "../graph/force";
 import { DEPTHS, type Depth, type Explore, drawnByCategory, exploreCategories, exploreMode } from "../graph/explore";
+import { type Filters, axisValueLists, docList } from "../graph/filters";
 
 interface Props {
   graph: Graph;
@@ -27,7 +28,9 @@ interface Props {
   spacing: number; onSpacing: (m: number) => void;
   follow: number; onFollow: (k0: number) => void;
   layout: LayoutState; onPause: (on: boolean) => void; onRelayout: () => void;
-  hiddenNodes: number;
+  filters: Filters; onFilters: (f: Filters) => void;
+  detachedCount: number;                  // `detached`의 edgeless + island
+  onOpenDoc: (docId: string) => void;     // 문서 이름 → 문서 패널(명세 §6.2)
 }
 
 const SEARCH_DEBOUNCE_MS = 150;
@@ -62,6 +65,21 @@ export function Controls(p: Props) {
     const next = new Set(p.rels);
     if (on) next.add(rel); else next.delete(rel);
     p.onRels(next);
+  };
+
+  // 거르기 — 문서 목록 · 축 값 목록은 받은 그래프에서 한 번(골격 밖 노드 기준 · DECISIONS P-46 · P-48).
+  const docs = useMemo(() => docList(p.graph), [p.graph]);
+  const axisLists = useMemo(() => axisValueLists(p.graph), [p.graph]);
+  const f = p.filters;
+  const setDoc = (d: string, on: boolean) => {
+    const off = new Set(f.docsOff);
+    if (on) off.delete(d); else off.add(d);
+    p.onFilters({ ...f, docsOff: off });
+  };
+  const setValue = (ax: Axis, v: string, on: boolean) => {
+    const off = new Set(f.valuesOff[ax] ?? []);
+    if (on) off.delete(v); else off.add(v);
+    p.onFilters({ ...f, valuesOff: { ...f.valuesOff, [ax]: off } });
   };
 
   const stepIndex = Math.max(0, SPACING_STEPS.indexOf(p.spacing));
@@ -107,6 +125,42 @@ export function Controls(p: Props) {
       )}
       {p.expandNote && <div className="note err">{p.expandNote}</div>}
       {p.dupEdges > 0 && <div className="note" data-testid="dup-edges">같은 엣지 {p.dupEdges}개는 한 번만 그렸다.</div>}
+
+      <h3>문서 {docs.length}</h3>
+      <div className="row">
+        <button onClick={() => p.onFilters({ ...f, docsOff: new Set() })} data-testid="docs-all">전부 켜기</button>
+        <button onClick={() => p.onFilters({ ...f, docsOff: new Set(docs.map(([d]) => d)) })}
+                data-testid="docs-none">전부 끄기</button>
+      </div>
+      <div className="doclist" data-testid="doc-list">
+        {docs.map(([d, n]) => (
+          <div className="chk" key={d} data-doc={d}>
+            <input type="checkbox" checked={!f.docsOff.has(d)} onChange={(e) => setDoc(d, e.target.checked)}
+                   aria-label={`${d} 켜기`} data-testid="doc-check" />
+            <a href="#" onClick={(e) => { e.preventDefault(); p.onOpenDoc(d); }} data-testid="doc-name">{d}</a>
+            <span className="muted" data-testid="doc-count">{n}</span>
+          </div>
+        ))}
+      </div>
+      <div className="note">골격이 아닌 노드는 나온 문서 중 하나라도 켜져 있으면 보인다. 골격은 늘 보인다.</div>
+
+      <h3>값</h3>
+      {axisLists.map(([ax, vals]) => (
+        <div className="axisvals" key={ax} data-axis={ax}>
+          <span className="muted">{ax}</span>
+          {vals.map(([v, n]) => (
+            <label className="chk" key={v} data-value={v}>
+              <input type="checkbox" checked={!(f.valuesOff[ax]?.has(v))} onChange={(e) => setValue(ax, v, e.target.checked)}
+                     data-testid="value-check" /> {v} <span className="muted">{n}</span>
+            </label>
+          ))}
+        </div>
+      ))}
+      <label className="chk">
+        <input type="checkbox" checked={f.detached} onChange={(e) => p.onFilters({ ...f, detached: e.target.checked })}
+               data-testid="detached-toggle" />
+        <span data-testid="detached-label">연결 없는 노드 {p.detachedCount}개 보이기</span>
+      </label>
 
       <h3>찾기</h3>
       <input type="search" placeholder="이름 · id — 강조 · Enter는 첫 결과에서 펼치기" value={typed}
@@ -159,7 +213,6 @@ export function Controls(p: Props) {
         <span className="sw line" style={{ background: COLOR.cross }} /> 층을 건너는 엣지(cross)는 관계 토글과 무관하게
         언제나 곡선으로 그린다.
       </div>
-      {p.hiddenNodes > 0 && <div className="note">연결 없는 노드 {p.hiddenNodes}개는 숨겼다(닻 없음).</div>}
 
       <h3>색</h3>
       <div className="radios">

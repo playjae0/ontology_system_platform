@@ -115,3 +115,13 @@ table.grid tr.total th { background: var(--panel); }
 .xchip .xchip-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .xchip button { border: none; background: none; padding: 0 4px; cursor: pointer; }
 .note.err { color: #b3261e; }
+
+/* ── P4 — 거르기 · 값 줄 · 원 레코드 ─────────────────────────────────── */
+.controls .doclist { max-height: 180px; overflow-y: auto; margin: 2px 0; }
+.controls .doclist .chk { display: flex; gap: 6px; align-items: center; }
+.controls .doclist .chk a { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.controls .axisvals { margin: 3px 0 6px; }
+.controls .axisvals .chk { display: inline-block; margin-right: 8px; }
+.detail .values { margin: 2px 0 6px; padding-left: 16px; }
+.detail .values li { font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+.detail pre.record { max-height: 320px; overflow: auto; font-size: 11px; }

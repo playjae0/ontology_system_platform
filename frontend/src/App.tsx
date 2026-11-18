@@ -12,6 +12,7 @@ import { type Axis, edgeShown } from "./graph/style";
 import {
   type Explore, type Depth, degreeOf, duplicateEdges, exploreMode, initialExplore, uniformDepths, visibleNodes, withChip,
 } from "./graph/explore";
+import { type Filters, detachedNodes, emptyFilters, reachable, shownNodes } from "./graph/filters";
 import { detectRenderer, type Renderer } from "./graph/renderer";
 import { FOLLOW_DEFAULT } from "./graph/force";
 import type { Graph, Health, LayoutState, PlatformStatus, SysStatus } from "./types";
@@ -63,6 +64,8 @@ export default function App() {
   const [expandFrom, setExpandFrom] = useState<string | null>(null);   // 새 노드가 출발할 자리(펼친 노드)
   const [expandNote, setExpandNote] = useState<string | null>(null);   // 펼치기 오류는 서버 문면 그대로
   const [renderer] = useState<Renderer>(() => detectRenderer());
+  // 거르기(명세 §5.3 [P4]) — 문서 · 축 값 · 연결 없는 노드. 기본은 전부 켜짐 · 연결 없는 노드는 숨김.
+  const [filters, setFilters] = useState<Filters>(() => emptyFilters());
 
   const canvasRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<GraphView | null>(null);
@@ -110,15 +113,20 @@ export default function App() {
     return () => { alive = false; window.clearTimeout(timer); };
   }, []);
 
-  // ── 보이는 노드 — 이 화면의 「보이기」는 이 한 값이다(명세 §5.4) ────────────────
-  const shown = useMemo(() => (graph && explore ? visibleNodes(graph, explore) : new Set<string>()),
-                        [graph, explore]);
+  // ── 보이는 노드 — 이 화면의 「보이기」는 이 한 값이다(명세 §5.3 · §5.4 — 탐색 ∪ 연결 없는 노드 − 거른 노드) ──
+  const shown = useMemo(() => (graph && explore ? shownNodes(graph, explore, filters) : new Set<string>()),
+                        [graph, explore, filters]);
+  const detachedSet = useMemo(() => new Set(graph ? detachedNodes(graph) : []), [graph]);
+  /** 칩의 +n — 거른 뒤에 새로 보이는 수. */
+  const visWith = (e: Explore) => (graph ? shownNodes(graph, e, filtersRef.current) : new Set<string>());
   const degree = useMemo(() => (graph ? degreeOf(graph) : new Map<string, number>()), [graph]);
   const dupEdges = useMemo(() => (graph ? duplicateEdges(graph) : 0), [graph]);
   const shownRef = useRef(shown);
   shownRef.current = shown;
   const exploreRef = useRef(explore);
   exploreRef.current = explore;
+  const filtersRef = useRef(filters);
+  filtersRef.current = filters;
 
   /** 펼치기(명세 §5.4) — 시스템이 준 1홉 이웃 중 닻 있는 것을 칩 하나로 더한다(화면이 이웃을 다시 찾지 않는다). */
   const expand = async (id: string) => {
@@ -129,10 +137,10 @@ export default function App() {
     if (r.error) { setExpandNote(`/api/neighbors — HTTP ${r.status} — ${r.error}`); return; }
     setExpandNote(null);
     const nbrs = (r.data.neighbors || []).map((x) => (typeof x === "string" ? x : x.id));
-    const nodes = [id, ...nbrs].filter((x) => x in graph.anchor);
+    const nodes = [id, ...nbrs].filter((x) => x in graph.anchor || (filters.detached && detachedSet.has(x)));
     const name = graph.nodes.find((n) => n.id === id)?.name ?? id;
     setExpandFrom(id);
-    setExplore((e) => (e ? withChip(graph, e, { key: `expand:${id}`, kind: "expand", label: `펼침: ${name}`, nodes }) : e));
+    setExplore((e) => (e ? withChip(graph, e, { key: `expand:${id}`, kind: "expand", label: `펼침: ${name}`, nodes }, visWith) : e));
   };
   const expandRef = useRef(expand);
   expandRef.current = expand;
@@ -148,10 +156,11 @@ export default function App() {
       if (!overlay) return rest.chips.length === e.chips.length ? e : rest;
       const base = visibleNodes(graph, rest);
       const pull = Object.keys(overlay.nodes).filter((id) => id in graph.anchor && !base.has(id));
+      // 끌어온 노드도 거르기를 따른다 — 칩의 +n은 거른 뒤의 수(visWith).
       if (!pull.length) return rest.chips.length === e.chips.length ? e : rest;
       const q = question.trim();
       const label = `질의: ${q.length > QUERY_CHIP_CHARS ? q.slice(0, QUERY_CHIP_CHARS) + "…" : q}`;
-      return withChip(graph, rest, { key: "query", kind: "query", label, nodes: pull });
+      return withChip(graph, rest, { key: "query", kind: "query", label, nodes: pull }, visWith);
     });
   }, [overlay, graph]);  // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -189,6 +198,14 @@ export default function App() {
         get mode() { return exploreRef.current ? exploreMode(exploreRef.current) : null; },
         get shown() { return [...shownRef.current]; },
       },
+      // P4 — 거르기의 지금 값(사본)
+      filters: {
+        get docsOff() { return [...filtersRef.current.docsOff]; },
+        get valuesOff() {
+          return Object.fromEntries(Object.entries(filtersRef.current.valuesOff).map(([k, v]) => [k, [...(v ?? [])]]));
+        },
+        get detached() { return filtersRef.current.detached; },
+      },
     };
     return () => { v.destroy(); viewRef.current = null; delete window.__platform; };
   }, [graph]);
@@ -209,28 +226,28 @@ export default function App() {
     const ids = new Set<string>();
     const edges = graph.edges.filter((e) => shown.has(e.src) && shown.has(e.dst) && edgeShown(e, rels)
                                             && !ids.has(e.id) && (ids.add(e.id), true));
-    const anchored = graph.nodes.filter((n) => n.id in graph.anchor).length;
-    return { nodes: shown.size, nodesAll: graph.nodes.length, edges: edges.length, edgesAll: graph.edges.length,
-             hiddenNodes: graph.nodes.length - anchored };
+    return { nodes: shown.size, nodesAll: graph.nodes.length, edges: edges.length, edgesAll: graph.edges.length };
   }, [graph, rels, shown]);
 
   /** 찾기 — 보이지 않는 노드(닻 있음)도 찾는다. 첫 결과 = 보이는 것 먼저 · 이름 순(명세 §5.3 [P3]). */
   const findHits = (text: string) => {
     const q = text.trim().toLowerCase();
     if (!graph || !q) return null;
-    const found = graph.nodes.filter((n) => n.id in graph.anchor && searchHit(n, q))
+    const found = graph.nodes.filter((n) => reachable(graph, n, filters, detachedSet) && searchHit(n, q))
       .sort((a, b) => (Number(!shown.has(a.id)) - Number(!shown.has(b.id))) || a.name.localeCompare(b.name)
                       || a.id.localeCompare(b.id));
     const vis = found.filter((n) => shown.has(n.id)).length;
     return { shown: vis, hidden: found.length - vis, first: found[0]?.id ?? null };
   };
-  const hits = useMemo(() => findHits(search), [graph, search, shown]);  // eslint-disable-line react-hooks/exhaustive-deps
+  const hits = useMemo(() => findHits(search), [graph, search, shown, filters]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   const setDepth = (cat: string, d: Depth) =>
     setExplore((e) => (e ? { ...e, depths: { ...e.depths, [cat]: d } } : e));
   const setAllDepths = (d: Depth, clearChips: boolean) =>
     setExplore((e) => (e && graph ? { depths: uniformDepths(graph, d), chips: clearChips ? [] : e.chips } : e));
   const dropChip = (key: string) => setExplore((e) => (e ? { ...e, chips: e.chips.filter((c) => c.key !== key) } : e));
+  /** 거르기를 바꾼다 — 새로 보이는 노드는 닻의 host 둘레에서 출발한다(펼친 노드가 아니다). */
+  const changeFilters = (f: Filters) => { setExpandFrom(null); setFilters(f); };
   const foldAll = () => setExplore((e) => (e ? { ...e, chips: e.chips.filter((c) => c.kind !== "expand") } : e));
 
   const pick = (id: string) => {
@@ -284,7 +301,8 @@ export default function App() {
                       follow={follow} onFollow={(k) => { setFollow(k); viewRef.current?.setFollow(k); }}
                       layout={layout} onPause={(on) => viewRef.current?.pause(on)}
                       onRelayout={() => viewRef.current?.relayout()}
-                      hiddenNodes={counts?.hiddenNodes ?? 0} />
+                      filters={filters} onFilters={changeFilters} detachedCount={detachedSet.size}
+                      onOpenDoc={setDocOpen} />
           )}
         </aside>
         <section className="canvas-wrap">
