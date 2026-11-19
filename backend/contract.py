@@ -21,8 +21,9 @@ FIELDS: dict[str, dict[str, list[str]]] = {
         "": ["home", "mode", "layers", "docs", "doc_types"],
     },
     "/api/graph": {
+        # `force`(시스템 손잡이 viewer_force)는 P5부터 쓰지 않는다 — 배치 상수는 플랫폼 `force.ts` 한 자리(명세 §4 · §5.1).
         "": ["nodes", "edges", "layers", "rels", "anchor", "detached", "roots",
-             "explore_threshold", "force"],
+             "explore_threshold"],
         "nodes[]": ["id", "name", "category", "layer", "status", "tier", "polarity",
                     "made_by", "aliases", "attrs", "docs", "prov", "queue"],
         "edges[]": ["id", "src", "dst", "rel", "layer", "status", "prov", "cross"],

@@ -411,8 +411,10 @@ def check_big(p, args, rep: Report, before: float | None):
             px = page.evaluate("() => { const s = window.__platform.sigma; const g = window.__platform.graph; let lo = 1e9, hi = 0;"
                                " g.forEachNode((id) => { const d = s.getNodeDisplayData(id); if (d) { lo = Math.min(lo, d.size); hi = Math.max(hi, d.size); } });"
                                " return [lo, hi]; }")
-            rep.item("ⓖ", bad == 0 and 3 <= lo and hi <= 18 and same,
-                     f"{tag} · 연결 수 순으로 크기가 거꾸로이거나 같은 수에 다른 크기인 이웃 쌍 {bad} · 크기 {lo:.2f}~{hi:.2f}(상수 3~18 · 그린 픽셀 "
+            # P5: 크기는 배치 단위 반지름 R_MIN~R_MAX(요청문 P5 ⓔ) — 상수는 손잡이 layoutInfo에서 읽는다.
+            li = page.evaluate("() => window.__platform.layoutInfo ? window.__platform.layoutInfo() : null") or {"rmin": 3, "rmax": 18}
+            rep.item("ⓖ", bad == 0 and li["rmin"] <= lo and hi <= li["rmax"] and same,
+                     f"{tag} · 연결 수 순으로 크기가 거꾸로이거나 같은 수에 다른 크기인 이웃 쌍 {bad} · 크기 {lo:.2f}~{hi:.2f}(상수 {li['rmin']}~{li['rmax']} · 그린 "
                      f"{px[0]:.2f}~{px[1]:.2f}) · 관계 전부 끄기·깊이 바꿈 뒤 노드마다 같음 {same}")
 
             # ⓒ 끌기 한 걸음 — 「전체」 · 연결 수가 가장 많은 노드

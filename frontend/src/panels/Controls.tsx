@@ -3,7 +3,10 @@
 import { useEffect, useMemo, useState } from "react";
 
 import type { Graph, LayoutState } from "../types";
-import { AXES, type Axis, axisValue, colorOf, COLOR, SIZE_MAX, SIZE_MIN, sizeOf } from "../graph/style";
+import { AXES, type Axis, axisValue, colorOf, COLOR, R_MAX, R_MIN, sizeOf } from "../graph/style";
+
+/** 크기 범례의 원 — 배치 단위 반지름을 범례 안에서 보이는 크기로 줄인다(그래프의 원은 화면 배율을 따른다). */
+const LEGEND_SCALE = 0.5;
 import { FOLLOW_STEPS } from "../graph/force";
 import { DEPTHS, type Depth, type Explore, drawnByCategory, exploreCategories, exploreMode } from "../graph/explore";
 import { type Filters, axisValueLists, docList } from "../graph/filters";
@@ -235,7 +238,7 @@ export function Controls(p: Props) {
       <div className="legend" data-testid="size-legend">
         {([["작은", 0], ["가운데", Math.round(p.maxDegree / 4)], [`최대 ${p.maxDegree}`, p.maxDegree]] as [string, number][])
           .map(([k, deg]) => {
-            const px = 2 * sizeOf(deg, p.maxDegree);
+            const px = 2 * LEGEND_SCALE * sizeOf(deg, p.maxDegree);
             return (
               <div className="row" key={k}>
                 <span className="dot" style={{ width: px, height: px }} /><span>{k}</span>
@@ -243,7 +246,7 @@ export function Controls(p: Props) {
               </div>
             );
           })}
-        <div className="note">원의 넓이가 연결 수에 비례한다(반지름 {SIZE_MIN}~{SIZE_MAX}px · 전체 엣지로 센다 — 토글·깊이로 바뀌지
+        <div className="note">원의 넓이가 연결 수에 비례한다(반지름 {R_MIN}~{R_MAX} 배치 단위 — 확대하면 함께 커진다 · 전체 엣지로 센다 — 토글·깊이로 바뀌지
           않는다). 라벨 글자 크기는 tier.</div>
         <div className="row"><span className="dot ring" /><span>테두리 = 골격 노드(status seed)</span></div>
       </div>

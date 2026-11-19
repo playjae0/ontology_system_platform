@@ -84,6 +84,7 @@ def main():
         print(plat.output())
         return 1
     _c, data = get_json(url + "api/graph")
+    # 전체 배치의 반복 수 — P5부터 플랫폼 상수(`force.ts` LAYOUT_TICKS · 손잡이 layoutInfo). 그 전 판은 /api/graph의 force.
     full_iter = (data.get("force") or {}).get("iterations") or 1500
     try:
         with sync_playwright() as p:
@@ -94,6 +95,7 @@ def main():
             page.goto(url)
             page.wait_for_function("window.__platform && window.__platform.layout.iterations > 0", timeout=30000)
             wait_rest(page)
+            full_iter = page.evaluate("() => window.__platform.layoutInfo ? window.__platform.layoutInfo().ticks : null") or full_iter
             degree = page.evaluate(JS_DEGREE)
             order = sorted(degree, key=lambda i: (-degree[i], i))
             hub = order[0]
@@ -189,7 +191,7 @@ def main():
                 ok = (st_moved[0] == "layout" and st_hold == ["layout", False, full_iter]
                       and st_rest == ["layout", False, full_iter] and off_e == 0)
                 rep.item("ⓔ", ok, f"{attempt}번째에 잡음 · 다 끈 뒤 {st_moved} → 누른 채 쉼 {st_hold} → 놓은 뒤 {st_rest} — "
-                                  f"끈 점만 고정된 채 전체 배치가 force.iterations {full_iter}까지 돔(끌기 배치로 안 바뀜) · "
+                                  f"끈 점만 고정된 채 전체 배치가 반복 상한 {full_iter}까지 돔(끌기 배치로 안 바뀜) · "
                                   f"끈 노드 어긋남 {off_e:.2e}")
 
             # ⓕ 밀대가 듣는다 — 같은 시작(다시 배치)에서 좁게 · 넓게로 같은 노드를 같은 거리만큼

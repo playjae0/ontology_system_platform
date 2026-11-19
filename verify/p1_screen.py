@@ -209,7 +209,7 @@ def main():
             cross_look = {tuple(looks[i][:2]) for i in cross}
             plain_look = {tuple(v[:2]) for k, v in looks.items() if k not in cross}
             ok = (set(vis["edges"]) == cross and bool(cross)
-                  and cross_look == {("curvedArrow", CROSS_COLOR)} and not (cross_look & plain_look)
+                  and cross_look == {("arrow", CROSS_COLOR)} and not (cross_look & plain_look)
                   and all(looks[i][2] is False for i in cross)
                   and all(v[2] is True for k, v in looks.items() if k not in cross))
             rep.item("ⓖ", ok, f"관계 토글 {len(data['rels'])}개 전부 끔 → 보이는 엣지 {len(vis['edges'])} = cross {len(cross)} · "
