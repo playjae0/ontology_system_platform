@@ -30,7 +30,7 @@ SAMPLES = {
     "/api/health": {"home": "/h", "mode": "mock", "layers": ["L"], "docs": 1, "doc_types": 1},
     "/api/graph": {"nodes": [NODE, dict(NODE, id="N2")], "edges": [EDGE], "layers": ["L"], "rels": ["r"],
                    "anchor": {}, "detached": {"edgeless": [], "island": []}, "roots": ["N1"],
-                   "explore_threshold": 1500, "force": {"scaling": 2}},
+                   "explore_threshold": 1500},   # `force`는 P5부터 칸 목록에서 뺐다(명세 §4)
     "/api/node/<id>": {"id": "N1", "name": "a", "anchor_path": [], "evidence": [], "evidence_total": 0,
                        "landed": []},
     "/api/neighbors/<id>": {"id": "N1", "neighbors": []},
