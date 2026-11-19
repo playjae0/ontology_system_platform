@@ -28,17 +28,18 @@ export type Axis = (typeof AXES)[number];
 export const axisValue = (n: GNode, ax: Axis): string =>
   n[ax] == null || n[ax] === "" ? "—" : String(n[ax]);
 
-/* 크기 — 연결 수(명세 §5.2 [P3]). 원의 넓이가 연결 수에 비례한다:
- *   반지름 = 최소 + (최대 − 최소) × √(연결 수 ÷ 그래프의 최대 연결 수)
- * 연결 수는 받을 때 한 번 센다(`explore.ts` degreeOf) — 토글·깊이·거르기로 바뀌지 않는다.
- * 최소·최대 픽셀은 이 한 자리다(가결정 — DECISIONS P-40). */
-export const SIZE_MIN = 3;
-export const SIZE_MAX = 18;
+/* 크기 — 연결 수(명세 §5.2 [P3] · [P5]). 원의 넓이가 연결 수에 비례한다:
+ *   반지름 = R_MIN + (R_MAX − R_MIN) × √(연결 수 ÷ 그래프의 최대 연결 수)
+ * 반지름은 **배치 단위**다 — sigma가 배치 좌표 기준으로 그려(`itemSizesReference: "positions"`) 확대하면 같은 비율로 커지고,
+ * 배치의 겹침 막기(`force_worker.js` forceCollide)가 같은 값을 쓴다. 연결 수는 받을 때 한 번 센다(`explore.ts` degreeOf).
+ * 처음 값은 요청문 P5 §2-① 그대로(가결정 — DECISIONS P-54). */
+export const R_MIN = 12;
+export const R_MAX = 30;
 export function sizeOf(degree: number, maxDegree: number): number {
-  if (!(maxDegree > 0)) return SIZE_MIN;
-  return SIZE_MIN + (SIZE_MAX - SIZE_MIN) * Math.sqrt(Math.max(0, degree) / maxDegree);
+  if (!(maxDegree > 0)) return R_MIN;
+  return R_MIN + (R_MAX - R_MIN) * Math.sqrt(Math.max(0, degree) / maxDegree);
 }
-/* 라벨 글자 크기는 tier 계단 그대로(main > sub > detail > 골격 밖). */
+/* 라벨 글자 크기는 tier 계단 그대로(main > sub > detail > 골격 밖) — 원 옆에 쓸 때. 원 안은 반지름에 비례(view.ts drawLabel). */
 const TIER_LABEL: Record<string, number> = { main: 1.45, sub: 1.15, detail: 1.0 };
 const LABEL_OTHER = 0.9;
 export const labelScaleOf = (n: GNode) => (n.tier && TIER_LABEL[n.tier]) || LABEL_OTHER;
@@ -62,7 +63,7 @@ export const COLOR = {
   dim: "#5b6472",
   faint: "#d5d9e0",
   line: "#b9c0ca",
-  cross: "#7b3fa8",        // 층을 건너는 엣지 — 곡선 + 이 색
+  cross: "#7b3fa8",        // 층을 건너는 엣지 — 직선 · 이 색 · 굵기 1.6(명세 §5.2 [P5])
   border: "#14171c",       // 골격 노드 테두리
   // 질의 겹쳐 보기(명세 §6.1) — 채널 하나가 0x00이나 0xFF라 값 색(colorOf: 채널 47~198)과 겹치지 않는다
   link: "#ff8000",         // 사전 링킹 노드

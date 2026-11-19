@@ -11,14 +11,13 @@ import Graph from "graphology";
 import Sigma from "sigma";
 import { EdgeArrowProgram, NodeCircleProgram } from "sigma/rendering";
 import type { NodeDisplayData, EdgeDisplayData } from "sigma/types";
-import { EdgeCurvedArrowProgram } from "@sigma/edge-curve";
 import { createNodeBorderProgram } from "@sigma/node-border";
 
 import type { GEdge, GNode, Graph as GraphData, LayoutState } from "../types";
-import { ForceLayout, FORCE_CFG, FORCE_ITER, FOLLOW_DEFAULT } from "./force";
+import { ForceLayout, FOLLOW_DEFAULT, GAP, LAYOUT_TICKS, SEED_SCALE } from "./force";
 import { seedPositions, type XY } from "./seed";
 import {
-  COLOR, FONT, type Axis, axisValue, colorOf, edgeShown, isSkeleton, labelScaleOf, shortName, sizeOf,
+  COLOR, FONT, R_MAX, R_MIN, type Axis, axisValue, colorOf, edgeShown, isSkeleton, labelScaleOf, shortName, sizeOf,
 } from "./style";
 
 /** 화면 쪽 선택 — 바뀌면 리듀서만 다시 돈다. */
@@ -37,13 +36,36 @@ export const edgeKey = (src: string, rel: string, dst: string) => `${src}|${rel}
 
 /** 관계 이름은 확대했을 때만 — 카메라 비율이 이보다 작으면(DECISIONS P-07). */
 const EDGE_LABEL_RATIO = 0.5;
-const CROSS_CURVATURE = 0.3;
+/** 엣지가 너무 가늘어지지 않게 받치는 화면 굵기(px) — 크기가 배치 단위라 축소하면 엣지도 가늘어진다(요청문 P5 ⑤). */
+const MIN_EDGE_PX = 1;
+/** 찾기에 걸린 노드를 키우는 배수 — 크기가 배치 단위라 더하기(+4px) 대신 비율로(요청문 P5 ⑤). */
+const SEARCH_GROW = 1.3;
 /** 새로 보이는 노드의 출발 고리 반경 — host와 이웃 사이 엣지 길이(중앙값)에 곱한다(DECISIONS P-41). */
 const FRESH_RING = 0.5;
 
 type NodeAttrs = { x: number; y: number; size: number; color: string; label: string; type: string;
                    node: GNode; labelScale: number; borderColor: string };
-type EdgeAttrs = { size: number; color: string; type: string; label: string; curvature: number; edge: GEdge };
+type EdgeAttrs = { size: number; color: string; type: string; label: string; edge: GEdge };
+
+/* ── 이름 자리(명세 §5.2 라벨 [P5]) — 들어가면 원 안 가운데 · 아니면 원 옆 ─────────────────────── */
+/** 원 안에 쓰는 문턱 — 그린 반지름(px)과 글자 폭 + 여백. */
+const INSIDE_MIN_R = 12;
+const INSIDE_MARGIN = 8;
+/** 원 안 글자 크기(px) — 반지름에 비례해 10~16. */
+const INSIDE_FONT_MIN = 10;
+const INSIDE_FONT_MAX = 16;
+const insideFont = (r: number) => Math.max(INSIDE_FONT_MIN, Math.min(INSIDE_FONT_MAX, r * 0.45));
+
+/** 원 색의 밝기 — 원 안 글자색(검정 · 흰색)을 고른다. */
+function isLight(hex: string): boolean {
+  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})/i.exec(hex || "");
+  if (!m) return true;
+  const [r, g, b] = [m[1], m[2], m[3]].map((h) => parseInt(h, 16));
+  return 0.299 * r + 0.587 * g + 0.114 * b > 150;
+}
+
+/** 마지막 그리기의 이름 자리 — 확인용 손잡이(`window.__platform.labels`). */
+export interface LabelItem { id: string; inside: boolean; r: number; w: number }
 
 /** sigma 3.0.3의 마우스 아래 노드 찾기 듣개 — 공개 API에 끄는 설정이 없어 비공개 칸을 쓴다(명세 §5.7 · DECISIONS P-42).
  *  sigma 판을 바꾸면 이 칸 이름을 다시 확인한다(package.json에서 3.0.3 고정). */
@@ -55,14 +77,32 @@ export function searchHit(n: GNode, q: string): boolean {
   return String(n.name).toLowerCase().includes(q) || String(n.id).toLowerCase() === q;
 }
 
-/** 라벨 그리기 — sigma 기본과 같고 글자 크기만 tier 계단을 따른다(시스템 `render.js`의 drawLabel). */
-function drawLabel(ctx: CanvasRenderingContext2D, data: Partial<NodeDisplayData> & { labelScale?: number },
-                   settings: { labelSize: number; labelWeight: string; labelFont: string }) {
-  if (!data.label) return;
-  const size = Math.round(settings.labelSize * (data.labelScale || 1));
-  ctx.fillStyle = COLOR.fg;
-  ctx.font = `${settings.labelWeight} ${size}px ${settings.labelFont}`;
-  ctx.fillText(data.label, (data.x ?? 0) + (data.size ?? 0) + 3, (data.y ?? 0) + size / 3);
+/** 이름 그리기 하나 — 그린 원의 화면 지름 ≥ 글자 폭 + 8px이고 반지름 ≥ 12px이면 원 안 가운데(글자 크기는 반지름에 비례 · 글자색은 원 밝기로),
+ *  아니면 원 옆(tier 계단 글자 크기 — 시스템 `render.js`의 drawLabel 그대로). `data.size`는 sigma가 넘기는 화면 반지름(px)이다. */
+function makeDrawLabel(record: (it: LabelItem) => void) {
+  return (ctx: CanvasRenderingContext2D, data: Partial<NodeDisplayData> & { labelScale?: number; key?: string },
+          settings: { labelSize: number; labelWeight: string; labelFont: string }) => {
+    if (!data.label) return;
+    const r = data.size ?? 0, x = data.x ?? 0, y = data.y ?? 0;
+    if (r >= INSIDE_MIN_R) {
+      const f = insideFont(r);
+      ctx.font = `${settings.labelWeight} ${f}px ${settings.labelFont}`;
+      const w = ctx.measureText(data.label).width;
+      if (w + INSIDE_MARGIN <= 2 * r) {
+        ctx.fillStyle = isLight(String(data.color)) ? COLOR.fg : "#ffffff";
+        ctx.textAlign = "center";
+        ctx.fillText(data.label, x, y + f / 3);
+        ctx.textAlign = "left";
+        record({ id: String(data.key ?? ""), inside: true, r, w });
+        return;
+      }
+    }
+    const size = Math.round(settings.labelSize * (data.labelScale || 1));
+    ctx.fillStyle = COLOR.fg;
+    ctx.font = `${settings.labelWeight} ${size}px ${settings.labelFont}`;
+    ctx.fillText(data.label, x + r + 3, y + size / 3);
+    record({ id: String(data.key ?? ""), inside: false, r, w: ctx.measureText(data.label).width });
+  };
 }
 
 export class GraphView {
@@ -81,9 +121,9 @@ export class GraphView {
   private follow = FOLLOW_DEFAULT;                // 「끌 때 따라오는 범위」의 k₀ — 다음 끌기부터
   private overlay: Overlay | null = null;         // 질의 겹쳐 보기 — 리듀서만 바꾼다
   private zoomedIn = false;
-  private scaling: number;
-  private readonly gravity: number;
-  private readonly iterations: number;
+  private spacing = 1;                            // 「간격」 배수(명세 §5.1 조절)
+  private labelItems: LabelItem[] = [];           // 지금 그리는 중인 이름 자리
+  lastLabels: LabelItem[] = [];                   // 마지막 그리기의 이름 자리(확인용 손잡이)
   private readonly edgesOnce: GEdge[];            // 같은 id는 처음 것만(명세 §5.7)
   private readonly degree: Map<string, number>;
   private readonly maxDegree: number;
@@ -96,10 +136,6 @@ export class GraphView {
               private onSelect: (id: string | null) => void, onLayout: (s: LayoutState) => void,
               private onExpand: (id: string) => void) {
     this.view = view;
-    const force = data.force || {};
-    this.scaling = force.scaling ?? FORCE_CFG.scaling;
-    this.gravity = force.gravity ?? FORCE_CFG.gravity;
-    this.iterations = force.iterations ?? FORCE_ITER;
     this.degree = degree;
     this.maxDegree = Math.max(0, ...degree.values());
     const seen = new Set<string>();
@@ -108,7 +144,7 @@ export class GraphView {
     // ── 그래프 — 보이는 노드와 양 끝이 다 보이는 엣지(서버 순서 그대로 — 전체 배치 좌표가 바뀌지 않게) ──
     const nodes = data.nodes.filter((n) => visible.has(n.id));
     const edges = this.edgesAmong(visible);
-    this.seed = seedPositions(nodes, edges, data.anchor, data.roots || []);
+    this.seed = this.seedOf(nodes, edges);
     for (const n of nodes) this.addNode(n, this.seed[n.id]);
     for (const e of edges) this.addEdge(e);
 
@@ -125,18 +161,44 @@ export class GraphView {
       labelFont: FONT, labelSize: 12, labelWeight: "normal", labelDensity: 0.6,
       labelColor: { color: COLOR.fg },
       edgeLabelFont: FONT, edgeLabelSize: 11, edgeLabelColor: { color: COLOR.dim },
-      defaultDrawNodeLabel: drawLabel as never,
+      defaultDrawNodeLabel: makeDrawLabel((it) => this.labelItems.push(it)) as never,
       nodeProgramClasses: { circle: NodeCircleProgram, bordered },
-      edgeProgramClasses: { arrow: EdgeArrowProgram, curvedArrow: EdgeCurvedArrowProgram },
+      edgeProgramClasses: { arrow: EdgeArrowProgram },
+      // 원 크기는 배치 단위 — 확대하면 같은 비율로 커지고, 배치의 겹침 막기와 같은 반지름이다(명세 §5.2 [P5]).
+      itemSizesReference: "positions",
+      zoomToSizeRatioFunction: (r: number) => r,
+      minEdgeThickness: MIN_EDGE_PX,
       nodeReducer: (id, a) => this.nodeReducer(id, a),
       edgeReducer: (id, a) => this.edgeReducer(id, a),
     });
     this.wire();
+    this.sigma.on("beforeRender", () => { this.labelItems = []; });
+    this.sigma.on("afterRender", () => { this.lastLabels = this.labelItems; });
 
     // ── 힘 배치 — 워커가 이어서 옮긴다 ─────────────────────────────────────
     this.layout = new ForceLayout((x, y, order) => this.applyFrame(x, y, order), onLayout);
-    this.layout.setGraph(nodes.map((n) => n.id), edges.map((e) => [e.src, e.dst]));
+    this.layout.setGraph(nodes.map((n) => n.id), edges.map((e) => [e.src, e.dst]), (id) => this.radiusOf(id));
     this.relayout();
+  }
+
+  /** 배치 단위 원 반지름 — 그리는 원과 겹침 막기가 같은 값(`style.ts` sizeOf). */
+  radiusOf(id: string): number {
+    return sizeOf(this.degree.get(id) || 0, this.maxDegree);
+  }
+
+  /** 확인용 — 배치 단위 반지름 · 쉬는 길이 상수 · 간격(요청문 P5 ⓐ ⓔ ⓖ). */
+  layoutInfo(): { radius: Record<string, number>; gap: number; rmin: number; rmax: number; spacing: number; ticks: number } {
+    const radius: Record<string, number> = {};
+    this.graph.forEachNode((id) => { radius[id] = this.radiusOf(id); });
+    return { radius, gap: GAP, rmin: R_MIN, rmax: R_MAX, spacing: this.spacing, ticks: LAYOUT_TICKS };
+  }
+
+  /** 시작 자리 — `seed.ts`의 결정적 자리에 배율 하나(2·R_MIN + GAP)를 곱한다(요청문 P5 §2-①). */
+  private seedOf(nodes: GNode[], edges: GEdge[]): Record<string, XY> {
+    const raw = seedPositions(nodes, edges, this.data.anchor, this.data.roots || []);
+    const out: Record<string, XY> = {};
+    for (const [id, p] of Object.entries(raw)) out[id] = { x: p.x * SEED_SCALE, y: p.y * SEED_SCALE };
+    return out;
   }
 
   destroy(): void {
@@ -185,14 +247,14 @@ export class GraphView {
 
     const nodes = this.data.nodes.filter((n) => ids.has(n.id));
     const edges = this.edgesAmong(ids);
-    this.seed = seedPositions(nodes, edges, this.data.anchor, this.data.roots || []);   // 「다시 배치」의 시작 자리
+    this.seed = this.seedOf(nodes, edges);   // 「다시 배치」의 시작 자리
     const kept = this.graph.order;
 
     if (fresh.length > kept) {
       // 새 노드가 더 많다 — 보이는 노드로 전체 배치(시작 자리부터)
       for (const n of fresh) this.addNode(n, this.seed[n.id]);
       for (const e of edges) this.addEdge(e);
-      this.layout.setGraph(nodes.map((n) => n.id), edges.map((e) => [e.src, e.dst]));
+      this.layout.setGraph(nodes.map((n) => n.id), edges.map((e) => [e.src, e.dst]), (id) => this.radiusOf(id));
       this.relayout();
       return;
     }
@@ -220,15 +282,15 @@ export class GraphView {
       }
     }
     for (const e of edges) this.addEdge(e);
-    this.layout.setGraph(nodes.map((n) => n.id), edges.map((e) => [e.src, e.dst]));
+    this.layout.setGraph(nodes.map((n) => n.id), edges.map((e) => [e.src, e.dst]), (id) => this.radiusOf(id));
 
     if (fresh.length) {
       this.layout.startSettle(new Set(fresh.map((n) => n.id)), this.currentPositions(),
-                              new Set(this.pinned.keys()), this.scaling, this.gravity);
+                              new Set(this.pinned.keys()), this.spacing);
     } else if (wasRunning) {
       // 빠지기만 했는데 전체 배치가 돌던 중이었다 — 남은 노드로 지금 자리에서 이어 돈다
       this.layout.start({ positions: this.currentPositions(), fixed: new Set(this.pinned.keys()),
-                          scaling: this.scaling, gravity: this.gravity, iterations: this.iterations });
+                          spacing: this.spacing, iterations: LAYOUT_TICKS });
     }
   }
 
@@ -237,17 +299,15 @@ export class GraphView {
   relayout(): void {
     this.pinned.clear();
     this.sigma.setCustomBBox(null);            // 화면 맞춤을 다시 켠다(끌 때 굳혔던 틀을 푼다)
-    this.layout.start({ positions: this.seed, fixed: new Set(), scaling: this.scaling, gravity: this.gravity,
-                        iterations: this.iterations });
+    this.layout.start({ positions: this.seed, fixed: new Set(), spacing: this.spacing, iterations: LAYOUT_TICKS });
   }
 
-  /** 간격(퍼짐) — 반발 세기에 곱한다. 지금 자리에서 다시 돈다(DECISIONS P-06). */
+  /** 간격(퍼짐) 배수 s — 쉬는 길이 × s · 밀어냄 × s²(명세 §5.1). 지금 자리에서 전체 배치로 다시 돈다(DECISIONS P-06). */
   setSpacing(mult: number): void {
-    const base = this.data.force?.scaling ?? FORCE_CFG.scaling;
-    this.scaling = base * mult;
+    this.spacing = mult;
     this.sigma.setCustomBBox(null);
     this.layout.start({ positions: this.currentPositions(), fixed: new Set(this.pinned.keys()),
-                        scaling: this.scaling, gravity: this.gravity, iterations: this.iterations });
+                        spacing: this.spacing, iterations: LAYOUT_TICKS });
   }
 
   pause(on: boolean): void {
@@ -278,10 +338,9 @@ export class GraphView {
   /** 엣지 하나 — 같은 id가 이미 있으면 그리지 않는다(처음 것만 · 그래프 전체가 깨지지 않게 · 명세 §5.7). */
   private addEdge(e: GEdge): void {
     if (this.graph.hasEdge(e.id) || !this.graph.hasNode(e.src) || !this.graph.hasNode(e.dst)) return;
-    // 층을 건너는 엣지는 한눈에 다른 선 — 곡선 + 다른 색(명세 §5.2).
+    // 선은 전부 직선 화살표 — 층을 건너는 엣지는 색과 굵기로만 가른다(명세 §5.2 [P5]).
     this.graph.addDirectedEdgeWithKey(e.id, e.src, e.dst, {
-      size: e.cross ? 1.6 : 1, color: e.cross ? COLOR.cross : COLOR.line,
-      type: e.cross ? "curvedArrow" : "arrow", label: e.rel, curvature: e.cross ? CROSS_CURVATURE : 0, edge: e,
+      size: e.cross ? 1.6 : 1, color: e.cross ? COLOR.cross : COLOR.line, type: "arrow", label: e.rel, edge: e,
     });
   }
 
@@ -345,7 +404,7 @@ export class GraphView {
     const q = v.search.trim().toLowerCase();
     if (q) {
       if (searchHit(n, q)) {
-        Object.assign(res, { size: a.size + 4, zIndex: 3, highlighted: true, forceLabel: true, label: n.name });
+        Object.assign(res, { size: a.size * SEARCH_GROW, zIndex: 3, highlighted: true, forceLabel: true, label: n.name });
       } else {
         Object.assign(res, { color: COLOR.faint, label: "" });
       }
@@ -421,8 +480,7 @@ export class GraphView {
       const layoutRunning = s.kind === "layout" && s.running;
       if (!this.press.dragLayout && !s.paused && !layoutRunning) {
         // 출발 좌표는 이 움직임을 반영하기 전 좌표다(워커가 여기서 알짜 힘을 재 제자리를 잡는다). 놓아 둔 점과 끄는 점은 고정.
-        this.layout.startDrag(node, this.currentPositions(), new Set(this.pinned.keys()), this.follow,
-                              this.scaling, this.gravity);
+        this.layout.startDrag(node, this.currentPositions(), new Set(this.pinned.keys()), this.follow, this.spacing);
         this.press.dragLayout = true;
       }
       const p = sg.viewportToGraph(e);

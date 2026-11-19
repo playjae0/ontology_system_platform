@@ -42,12 +42,6 @@ export interface Anchor {
   hops: number;
 }
 
-export interface Force {
-  scaling?: number;
-  gravity?: number;
-  iterations?: number;
-}
-
 export interface Graph {
   nodes: GNode[];
   edges: GEdge[];
@@ -57,7 +51,6 @@ export interface Graph {
   detached: { edgeless: string[]; island: string[] };
   roots: string[];
   explore_threshold: number;
-  force: Force;
 }
 
 export interface SysStatus {

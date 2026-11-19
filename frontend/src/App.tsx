@@ -198,6 +198,12 @@ export default function App() {
         get mode() { return exploreRef.current ? exploreMode(exploreRef.current) : null; },
         get shown() { return [...shownRef.current]; },
       },
+      // P5 — 마지막 그리기의 이름 자리(원 안 · 원 옆)와 배치 단위 정보(읽기 전용)
+      get labels() {
+        const items = v.lastLabels.map((x) => ({ ...x }));
+        return { inside: items.filter((x) => x.inside).length, outside: items.filter((x) => !x.inside).length, items };
+      },
+      layoutInfo: () => v.layoutInfo(),
       // P4 — 거르기의 지금 값(사본)
       filters: {
         get docsOff() { return [...filtersRef.current.docsOff]; },
